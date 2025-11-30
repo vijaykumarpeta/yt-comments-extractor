@@ -1,0 +1,4 @@
+customtkinter
+google-api-python-client
+pandas
+
