@@ -5,6 +5,10 @@ A robust desktop application built with Python and CustomTkinter for extracting 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 [![X (formerly Twitter) Follow](https://img.shields.io/twitter/follow/vjpeta?style=social)](https://x.com/vjpeta)
+
+## GUI Interface
+<img width="902" height="732" alt="image" src="https://github.com/user-attachments/assets/8760e7de-dee8-46ad-a1f6-306d890fdbc0" />
+
 ## 🚀 Key Features
 
 *   **Batch Processing**: Queue up multiple video URLs (one per line) and process them sequentially.
@@ -101,6 +105,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
+
 
 
 
