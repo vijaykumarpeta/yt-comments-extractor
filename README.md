@@ -27,8 +27,8 @@ A robust desktop application built with Python and CustomTkinter for extracting 
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/yourusername/youtube-comment-extractor.git
-    cd youtube-comment-extractor
+    git clone https://github.com/vijaykumarpeta/yt-comments-extractor.git
+    cd yt-comments-extractor
     ```
 
 2.  **Create a Virtual Environment (Recommended)**
@@ -86,7 +86,7 @@ You can convert this Python script into a standalone Windows executable that run
 ## 📂 Project Structure
 
 ```
-youtube-comment-extractor/
+yt-comments-extractor/
 ├── main.py             # GUI entry point and application logic
 ├── extractor.py        # YouTube API interaction and data processing logic
 ├── requirements.txt    # Python dependencies
@@ -101,3 +101,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
+
