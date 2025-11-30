@@ -11,8 +11,8 @@ A robust desktop application built with Python and CustomTkinter for extracting 
 *   **Clean Data**: Built-in **Spam/Bot Filter** automatically removes comments containing common spam keywords (e.g., "crypto", "whatsapp", "invest") and phone number patterns.
 *   **Smart Sorting**: Fetches comments using YouTube's "Relevance" metric and sorts the final output by **Like Count (Descending)** to prioritize high-signal discussions.
 *   **Dual Export**: Generates two separate CSV files for each video to avoid data redundancy:
-    *   `_metadata.csv`: Video Title, Views, Likes, Comment Count, Published Date.
-    *   `_comments.csv`: Comment Text, Author, Date, Likes, Reply Count.
+    *   `_metadata.csv`: Video Title, Views, Likes, Comment Count, Published Date, Video ID
+    *   `_comments.csv`: Video ID, Comment Text, Date, Likes, Reply Count.
 *   **Modern UI**: Sleek, dark-themed interface built with `CustomTkinter` featuring real-time progress logs.
 *   **Persistent Settings**: Automatically saves your API Key locally so you don't have to re-enter it.
 *   **Rate Limiting**: Includes random delays between batch requests to respect YouTube API limits.
@@ -101,4 +101,5 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
+
 
