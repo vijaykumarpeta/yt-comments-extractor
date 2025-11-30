@@ -52,8 +52,8 @@ class YouTubeCommentExtractor:
         """Checks if the comment text contains common spam keywords."""
         spam_keywords = [
             'whatsapp', 'telegram', 'invest', 'crypto', 'forex', 'bitcoin', 'btc', 
-            'return', 'income', 'trading', 'fx', 'binance', 'coinbase', 'usdt',
-            'contact me', 'message me', 'dm me'
+            'trading', 'fx', 'binance', 'coinbase', 'usdt', 'contact me', 
+            'message me', 'dm me'
         ]
         
         text_lower = text.lower()
@@ -174,3 +174,4 @@ class YouTubeCommentExtractor:
             df_comments.to_csv(comments_filename, index=False)
             
         return base_filename
+
