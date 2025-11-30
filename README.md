@@ -4,6 +4,7 @@ A robust desktop application built with Python and CustomTkinter for extracting 
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
+Follow me on X: [@vjpeta](x.com)
 
 ## 🚀 Key Features
 
@@ -101,5 +102,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
+
 
 
