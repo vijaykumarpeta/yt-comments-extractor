@@ -121,8 +121,7 @@ class YouTubeCommentExtractor:
                         'Comment Date': top_comment['publishedAt'],
                         'Comment Likes': top_comment['likeCount'],
                         'Replies': item['snippet']['totalReplyCount'],
-                        'Type': 'Comment',
-                        'Parent ID': ''
+                        'Type': 'Comment'
                     }
                     comments.append(comment_data)
                     
@@ -174,4 +173,5 @@ class YouTubeCommentExtractor:
             df_comments.to_csv(comments_filename, index=False)
             
         return base_filename
+
 
