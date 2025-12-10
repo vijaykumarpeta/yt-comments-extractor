@@ -1,6 +1,6 @@
 # YouTube Comment Extractor
 
-A powerful desktop application for extracting, filtering, and analyzing YouTube comments with advanced spam detection. Built for researchers, data analysts, content creators, and anyone who needs clean, actionable comment data.
+A powerful desktop application for extracting and filtering YouTube comments with advanced spam detection. Built for researchers, data analysts, content creators, and anyone who needs clean, actionable comment data.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
