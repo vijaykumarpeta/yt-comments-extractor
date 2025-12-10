@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yt-comments-extractor"
+version = "2.0.0"
+description = "Extract and filter YouTube comments with advanced spam detection"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Vijay Kumar Peta", email = "vijay.wda@gmail.com"}
+]
+keywords = [
+    "youtube",
+    "comments",
+    "extractor",
+    "spam-detection",
+    "data-analysis",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Multimedia :: Video",
+]
+
+dependencies = [
+    "customtkinter>=5.2.0",
+    "google-api-python-client>=2.100.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+secure = [
+    "keyring>=24.0.0",
+]
+
+[project.scripts]
+yt-comments = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/yt-comments-extractor"
+Documentation = "https://github.com/yourusername/yt-comments-extractor#readme"
+Repository = "https://github.com/yourusername/yt-comments-extractor.git"
+Issues = "https://github.com/yourusername/yt-comments-extractor/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = [
+    "venv",
+    "build",
+    "dist",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.mypy_cache
+    | \.venv
+    | venv
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip = [".git", "venv", ".venv", "build", "dist"]

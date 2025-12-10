@@ -3,28 +3,33 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-*.egg
+.Python
+venv/
+ENV/
+.pytest_cache/
 *.egg-info/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/
+
+# App
+settings.json
+*.csv
+*.xlsx
 dist/
 build/
 *.spec
 
-# Virtual Environment
-venv/
-env/
-ENV/
-
-# App-specific
-settings.json
-*.csv
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
 # OS
 .DS_Store
 Thumbs.db
+
+#DIST
+dist/
+build/
+*.exe

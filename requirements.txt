@@ -1,4 +1,8 @@
-customtkinter
-google-api-python-client
-pandas
+# Core dependencies
+customtkinter>=5.2.0
+google-api-python-client>=2.100.0
+pandas>=2.0.0
+openpyxl>=3.1.0
 
+# Optional: Secure credential storage
+keyring>=24.0.0
