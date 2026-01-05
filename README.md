@@ -138,9 +138,9 @@ Without keyring, your API key is stored in `settings.json`. With keyring, it's s
 
 | Level | Threshold | Description |
 |-------|-----------|-------------|
-| **Light** | 0.65 | Only catches obvious spam, minimal false positives |
+| **Aggressive** | 0.65 | Catches more spam, slight risk of false positives |
 | **Moderate** | 0.50 | Balanced filtering (default) |
-| **Aggressive** | 0.35 | Catches more spam, slight risk of false positives |
+| **Light** | 0.35 | Only catches obvious spam, minimal false positives |
 
 ### Filter Words Feature
 
