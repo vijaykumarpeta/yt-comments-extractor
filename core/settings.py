@@ -15,6 +15,8 @@ from core.constants import (
     SETTINGS_FILE,
     KEYRING_SERVICE_NAME,
     KEYRING_API_KEY_NAME,
+    WINDOW_DEFAULT_WIDTH,
+    WINDOW_DEFAULT_HEIGHT,
     SortOption,
     SpamFilterStrength,
 )
@@ -60,8 +62,8 @@ class AppSettings:
     date_to: Optional[str] = None
 
     # UI preferences
-    window_width: int = 950
-    window_height: int = 970
+    window_width: int = WINDOW_DEFAULT_WIDTH
+    window_height: int = WINDOW_DEFAULT_HEIGHT
 
     def to_dict(self, include_api_key: bool = False) -> dict:
         """
@@ -73,8 +75,7 @@ class AppSettings:
         data = asdict(self)
         if not include_api_key:
             del data["api_key"]
-        # Remove None values for cleaner JSON
-        return {k: v for k, v in data.items() if v is not None}
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "AppSettings":
@@ -107,9 +108,14 @@ class SettingsManager:
         Initialize the settings manager.
 
         Args:
-            settings_file: Path to settings file. Defaults to SETTINGS_FILE constant.
+            settings_file: Path to settings file. Defaults to SETTINGS_FILE
+                          in the same directory as this module's package.
         """
-        self.settings_file = Path(settings_file or SETTINGS_FILE)
+        if settings_file:
+            self.settings_file = Path(settings_file)
+        else:
+            app_dir = Path(__file__).resolve().parent.parent
+            self.settings_file = app_dir / SETTINGS_FILE
         self._use_keyring = KEYRING_AVAILABLE
 
     @property
@@ -132,12 +138,6 @@ class SettingsManager:
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     settings = AppSettings.from_dict(data)
-
-                    # Handle legacy sort_by values
-                    if settings.sort_by == "date_desc":
-                        settings.sort_by = SortOption.DATE_NEWEST.value
-                    elif settings.sort_by == "date_asc":
-                        settings.sort_by = SortOption.DATE_OLDEST.value
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse settings file: {e}")

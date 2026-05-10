@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
 
@@ -44,7 +44,12 @@ from core.validators import (
     MaxCommentsValidator,
     WordsFilterValidator,
 )
-from extractor import YouTubeCommentExtractor
+from extractor import (
+    YouTubeCommentExtractor,
+    CommentsDisabledError,
+    VideoNotFoundError,
+    QuotaExceededError,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -69,7 +74,7 @@ ctk.set_default_color_theme("blue")
 class FetchState:
     """State for the fetch operation."""
     is_fetching: bool = False
-    cancel_event: threading.Event = None
+    cancel_event: Optional[threading.Event] = None
 
     def __post_init__(self):
         if self.cancel_event is None:
@@ -113,6 +118,11 @@ class App(ctk.CTk):
         self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.configure(fg_color=COLORS["bg_dark"])
 
+        # Set window icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.ico")
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
+
         # Grid configuration - header on top, sidebar + main content below
         self.grid_columnconfigure(0, weight=0)  # Sidebar - fixed width
         self.grid_columnconfigure(1, weight=1)  # Main content - expandable
@@ -133,6 +143,9 @@ class App(ctk.CTk):
         # Custom filter patterns
         self._blacklist_patterns: str = ""
         self._whitelist_patterns: str = ""
+
+        # Thread reference for clean shutdown
+        self._fetch_thread_ref: Optional[threading.Thread] = None
 
         # Build UI
         self._create_header()
@@ -160,7 +173,7 @@ class App(ctk.CTk):
             self,
             fg_color=COLORS["bg_card"],
             corner_radius=0,
-            height=80
+            height=95
         )
         self.header_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.header_frame.grid_propagate(False)
@@ -178,7 +191,16 @@ class App(ctk.CTk):
         )
         title_label.pack(anchor="w")
 
-        # Subtitle
+        # Brand attribution
+        brand_label = ctk.CTkLabel(
+            header_content,
+            text="by Creator Intelligence",
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["accent"]
+        )
+        brand_label.pack(anchor="w", pady=(1, 0))
+
+        # Tagline
         subtitle_label = ctk.CTkLabel(
             header_content,
             text=f"{APP_DESCRIPTION}",
@@ -665,7 +687,7 @@ class App(ctk.CTk):
 
         filter_words_label = ctk.CTkLabel(
             filter_words_header,
-            text="🔍 Filter Words",
+            text="🔍 Only fetch comments with these words",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color=COLORS["text_primary"]
         )
@@ -704,6 +726,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
             fg_color=COLORS["accent"],
             hover_color=COLORS["accent_hover"],
+            text_color="#000000",
             corner_radius=8
         )
         self.fetch_button.pack(side="left")
@@ -995,9 +1018,9 @@ class App(ctk.CTk):
         """Handle window close event - cancel any running operations."""
         if self.fetch_state.is_fetching:
             self.fetch_state.request_cancel()
-            self.after(100, self.destroy)
-        else:
-            self.destroy()
+            if self._fetch_thread_ref and self._fetch_thread_ref.is_alive():
+                self._fetch_thread_ref.join(timeout=2.0)
+        self.destroy()
 
     def _toggle_api_key_visibility(self) -> None:
         """Toggle API key visibility."""
@@ -1151,7 +1174,7 @@ class App(ctk.CTk):
         """Parse filter words into a list."""
         return WordsFilterValidator.parse(self.filter_words_entry.get())
 
-    def _get_date_range(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    def _get_date_range(self) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Get and validate date range."""
         from_date = DateValidator.parse(self.from_date_entry.get())
         to_date = DateValidator.parse(self.to_date_entry.get())
@@ -1189,7 +1212,7 @@ class App(ctk.CTk):
         )
         entry.pack(fill="x", padx=10, pady=3)
 
-        self.log_frame.after(10, lambda: entry.winfo_toplevel() and self._scroll_log_to_bottom())
+        self.log_frame.after(10, self._scroll_log_to_bottom)
 
     def _update_stats(self) -> None:
         """Update statistics display."""
@@ -1304,7 +1327,7 @@ class App(ctk.CTk):
             self.log_message(f"Max {max_comments} comments per video", "muted")
 
         # Start fetch thread
-        thread = threading.Thread(
+        self._fetch_thread_ref = threading.Thread(
             target=self._fetch_thread,
             args=(
                 valid_urls,
@@ -1319,7 +1342,7 @@ class App(ctk.CTk):
             ),
             daemon=True
         )
-        thread.start()
+        self._fetch_thread_ref.start()
 
     def _fetch_thread(
         self,
@@ -1362,6 +1385,7 @@ class App(ctk.CTk):
                         date_from=date_from,
                         date_to=date_to,
                         filter_words=filter_words if filter_words else None,
+                        cancel_event=self.fetch_state.cancel_event,
                     )
 
                     with self._data_lock:
@@ -1375,16 +1399,17 @@ class App(ctk.CTk):
                     self.after(0, lambda msg=log_msg: self.log_message(msg, "success"))
                     self.after(0, self._update_stats)
 
+                except CommentsDisabledError:
+                    self.after(0, lambda:
+                        self.log_message("Error: Comments are disabled for this video", "error"))
+                except VideoNotFoundError:
+                    self.after(0, lambda:
+                        self.log_message("Error: Video not found", "error"))
+                except QuotaExceededError:
+                    self.after(0, lambda:
+                        self.log_message("Error: API quota exceeded. Try again tomorrow.", "error"))
                 except Exception as e:
-                    error_msg = str(e)
-                    if "403" in error_msg:
-                        error_msg = "Comments are disabled for this video"
-                    elif "404" in error_msg:
-                        error_msg = "Video not found"
-                    elif "quotaExceeded" in error_msg.lower():
-                        error_msg = "API quota exceeded. Try again tomorrow."
-
-                    self.after(0, lambda err=error_msg:
+                    self.after(0, lambda err=str(e):
                         self.log_message(f"Error: {err}", "error"))
 
                 progress = video_num / total_videos
@@ -1435,9 +1460,13 @@ class App(ctk.CTk):
 
     def export_csv(self) -> None:
         """Export data to CSV files."""
-        if not self.all_comments:
-            messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")
-            return
+        with self._data_lock:
+            if not self.all_comments:
+                messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")
+                return
+            metadata = list(self.all_metadata)
+            comments = list(self.all_comments)
+            spam = list(self.all_spam)
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".csv",
@@ -1449,17 +1478,17 @@ class App(ctk.CTk):
             base_filename = os.path.splitext(filename)[0]
             try:
                 self.extractor.save_to_csv(
-                    self.all_metadata,
-                    self.all_comments,
+                    metadata,
+                    comments,
                     base_filename,
-                    spam_list=self.all_spam if self.all_spam else None
+                    spam_list=spam if spam else None
                 )
 
                 files_saved = [
                     f"• {os.path.basename(base_filename)}_metadata.csv",
                     f"• {os.path.basename(base_filename)}_comments.csv"
                 ]
-                if self.all_spam:
+                if spam:
                     files_saved.append(f"• {os.path.basename(base_filename)}_spam.csv")
 
                 self.log_message(f"Exported {len(files_saved)} files", "success")
@@ -1474,9 +1503,13 @@ class App(ctk.CTk):
 
     def export_excel(self) -> None:
         """Export data to Excel file."""
-        if not self.all_comments:
-            messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")
-            return
+        with self._data_lock:
+            if not self.all_comments:
+                messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")
+                return
+            metadata = list(self.all_metadata)
+            comments = list(self.all_comments)
+            spam = list(self.all_spam)
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
@@ -1487,14 +1520,14 @@ class App(ctk.CTk):
         if filename:
             try:
                 self.extractor.save_to_excel(
-                    self.all_metadata,
-                    self.all_comments,
+                    metadata,
+                    comments,
                     filename,
-                    spam_list=self.all_spam if self.all_spam else None
+                    spam_list=spam if spam else None
                 )
 
                 sheets = ["Metadata", "Comments"]
-                if self.all_spam:
+                if spam:
                     sheets.append("Flagged Spam")
 
                 self.log_message(f"Exported to: {os.path.basename(filename)}", "success")

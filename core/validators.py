@@ -351,7 +351,23 @@ class WordsFilterValidator:
         return words
 
     @classmethod
-    def matches_any(cls, text: str, words: List[str]) -> bool:
+    def compile_pattern(cls, words: List[str]) -> Optional[re.Pattern]:
+        """
+        Pre-compile a single regex pattern from a list of filter words.
+
+        Args:
+            words: List of words to match
+
+        Returns:
+            Compiled pattern or None if words is empty
+        """
+        if not words:
+            return None
+        escaped = [re.escape(w.lower()) for w in words]
+        return re.compile(r'\b(?:' + '|'.join(escaped) + r')\b', re.IGNORECASE)
+
+    @classmethod
+    def matches_any(cls, text: str, words: List[str], compiled: Optional[re.Pattern] = None) -> bool:
         """
         Check if text contains any of the specified words.
 
@@ -360,18 +376,15 @@ class WordsFilterValidator:
         Args:
             text: The text to search in (e.g., comment text)
             words: List of words to search for
+            compiled: Optional pre-compiled pattern from compile_pattern()
 
         Returns:
             True if text contains any word, False otherwise.
             Returns True if words list is empty (no filter applied).
         """
         if not words:
-            return True  # No filter = all comments pass
+            return True
 
-        text_lower = text.lower()
-        for word in words:
-            # Use word boundaries for whole-word matching
-            pattern = r'\b' + re.escape(word.lower()) + r'\b'
-            if re.search(pattern, text_lower):
-                return True
-        return False
+        if compiled is None:
+            compiled = cls.compile_pattern(words)
+        return compiled.search(text) is not None

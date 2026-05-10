@@ -26,6 +26,8 @@ from core.validators import (
     DateValidator,
     APIKeyValidator,
     MinLikesValidator,
+    MaxCommentsValidator,
+    WordsFilterValidator,
 )
 from core.settings import SettingsManager, AppSettings
 
@@ -52,6 +54,8 @@ __all__ = [
     "DateValidator",
     "APIKeyValidator",
     "MinLikesValidator",
+    "MaxCommentsValidator",
+    "WordsFilterValidator",
     # Settings
     "SettingsManager",
     "AppSettings",

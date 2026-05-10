@@ -1,7 +1,7 @@
 """
 Spam Detection Module for YouTube Comments.
 
-Version: 2.0.0
+Version: 2.1.0
 
 A multi-signal scoring system that focuses on promotional INTENT rather than
 writing style. Designed to catch spam while protecting legitimate engagement
@@ -34,10 +34,15 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from enum import Enum
-from typing import Dict, FrozenSet, List, Optional, Set
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+
+from core.constants import SpamFilterStrength
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +102,14 @@ FAKE_BADGE_CHARS: FrozenSet[str] = frozenset({
     '✓', '✔', '✅', '☑', '🔵', '⚪', '🔘', '🔷', '💎', '⭐'
 })
 
+SPAM_EMOJI: FrozenSet[str] = frozenset({
+    '💰', '💵', '💲', '💸', '🤑',
+    '🚀', '🔥', '💎', '📈', '⬆️',
+    '👇', '👆', '⬇️', '➡️', '👉',
+    '💋', '😍', '🔞', '😉', '🍑',
+    '⚠️', '🔴', '❗', '‼️', '❕',
+})
+
 
 def normalize_text(text: str) -> str:
     """
@@ -140,36 +153,48 @@ def normalize_text(text: str) -> str:
     def deobfuscate_word(word: str) -> str:
         if len(word) < 5:
             return word
-        punct_count = sum(1 for c in word if c in '."\'-_`')
+        # Only strip dots, underscores, backticks — preserve apostrophes and hyphens
+        obfuscation_chars = '._`'
+        punct_count = sum(1 for c in word if c in obfuscation_chars)
         char_count = sum(1 for c in word if c.isalnum())
-        # If roughly half the characters are punctuation, it's likely obfuscated
-        if punct_count >= char_count * 0.4 and punct_count >= 2:
-            return re.sub(r'[."\'\-_`]', '', word)
+        if char_count == 0:
+            return word
+        # Require high ratio — true obfuscation like t.e.l.e.g.r.a.m has ~50% dots
+        if punct_count >= char_count * 0.5 and punct_count >= 3:
+            return re.sub(r'[._`]', '', word)
         return word
     
     # Apply to each word
     words = normalized.split()
     normalized = ' '.join(deobfuscate_word(w) for w in words)
     
-    # Step 4: Normalize leetspeak - but preserve URLs, mentions, and standalone numbers
-    def normalize_segment(segment: str) -> str:
-        # Skip if it looks like a URL
-        if '/' in segment or segment.startswith(('http', 'www', 't.me', 'bit.ly')):
-            return segment
-        # If starts with @ it's a mention - preserve the @ and normalize the rest
-        if segment.startswith('@'):
-            return '@' + normalize_segment(segment[1:]) if len(segment) > 1 else segment
-        # Apply leetspeak normalization for all other cases
-        # (including wh@ts@pp where @ is in the middle)
-        return ''.join(LEETSPEAK_MAP.get(c, c) for c in segment)
-    
-    # Split by URL-like patterns and normalize non-URL parts
-    url_pattern = re.compile(r'(https?://\S+|www\.\S+|t\.me/\S+|\S+\.ly/\S+)')
-    parts = url_pattern.split(normalized)
-    normalized = ''.join(
-        segment if url_pattern.match(segment) else normalize_segment(segment)
-        for segment in parts
-    )
+    # Step 4: Normalize leetspeak per-word, preserving URLs, mentions, and non-alpha tokens
+    def normalize_word_leet(word: str) -> str:
+        # Skip URLs
+        if '/' in word or word.startswith(('http', 'www', 't.me', 'bit.ly')):
+            return word
+        # Preserve @ prefix for mentions
+        if word.startswith('@'):
+            return '@' + normalize_word_leet(word[1:]) if len(word) > 1 else word
+        # Skip tokens with no alpha characters (e.g., "$100", "...")
+        if not any(c.isalpha() for c in word):
+            return word
+        # Only normalize leet chars that are embedded between alpha chars,
+        # not trailing punctuation like "!" or leading symbols like "#"
+        result = []
+        for i, c in enumerate(word):
+            if c in LEETSPEAK_MAP:
+                has_alpha_before = any(word[j].isalpha() for j in range(i))
+                has_alpha_after = any(word[j].isalpha() for j in range(i + 1, len(word)))
+                if has_alpha_before and has_alpha_after:
+                    result.append(LEETSPEAK_MAP[c])
+                else:
+                    result.append(c)
+            else:
+                result.append(c)
+        return ''.join(result)
+
+    normalized = ' '.join(normalize_word_leet(w) for w in normalized.split())
     
     # Step 5: Collapse multiple spaces
     normalized = re.sub(r'\s+', ' ', normalized)
@@ -211,6 +236,8 @@ class SpamCategory(Enum):
     ADULT_CONTENT = "adult_content"
     ENGAGEMENT_BAIT = "engagement_bait"
     OBFUSCATION = "obfuscation"
+    STRUCTURAL_SPAM = "structural_spam"
+    SPAM_CAMPAIGN = "spam_campaign"
 
 
 @dataclass
@@ -579,6 +606,12 @@ class SpamDetector:
         # Reply to specific user (indicates engagement)
         self.reply_pattern = re.compile(r'^@[a-zA-Z0-9_]+\s')
         
+        # =====================================================================
+        # STRUCTURAL / CHARACTER DENSITY PATTERNS
+        # =====================================================================
+
+        self.repetitive_punct = re.compile(r'([!?])\1{2,}')
+
         # Constructive criticism / balanced feedback
         self.balanced_feedback = re.compile(
             r'\b(but\s*(i\s*think|maybe|however)|'
@@ -913,7 +946,11 @@ class SpamDetector:
                 weight=0.15,  # Annoying but not malicious
                 matched_text=match.group(0)
             ))
-        
+
+        # --- Structural / Character Density (amplifiers, not standalone) ---
+
+        self._check_structural_signals(text, signals)
+
         # =====================================================================
         # CALCULATE BASE SCORE
         # =====================================================================
@@ -931,7 +968,13 @@ class SpamDetector:
                 base_score += w * (0.5 ** i)
             
             base_score = min(base_score, 1.0)
-        
+
+        # =====================================================================
+        # SIGNAL COMBINATION BOOSTS
+        # =====================================================================
+
+        base_score = self._apply_combo_boosts(signals, base_score)
+
         # =====================================================================
         # CHECK LEGITIMACY SIGNALS (reduce score)
         # =====================================================================
@@ -1052,6 +1095,72 @@ class SpamDetector:
             had_obfuscation=had_obfuscation
         )
     
+    # -----------------------------------------------------------------
+    # Structural / character-density analysis
+    # -----------------------------------------------------------------
+
+    SPAM_COMBO_BOOSTS = [
+        ({SpamCategory.CRYPTO_SCAM, SpamCategory.CONTACT_SOLICITATION}, 0.15),
+        ({SpamCategory.CRYPTO_SCAM, SpamCategory.PLATFORM_REDIRECT}, 0.15),
+        ({SpamCategory.FINANCIAL_SCAM, SpamCategory.CONTACT_SOLICITATION}, 0.15),
+        ({SpamCategory.FINANCIAL_SCAM, SpamCategory.PLATFORM_REDIRECT}, 0.15),
+        ({SpamCategory.CHANNEL_PROMOTION, SpamCategory.PHISHING}, 0.12),
+        ({SpamCategory.SELF_PROMOTION, SpamCategory.PHISHING}, 0.12),
+        ({SpamCategory.CRYPTO_SCAM, SpamCategory.FINANCIAL_SCAM}, 0.10),
+        ({SpamCategory.IMPERSONATION, SpamCategory.PLATFORM_REDIRECT}, 0.15),
+    ]
+
+    @staticmethod
+    def _apply_combo_boosts(signals: List[SpamSignal], base_score: float) -> float:
+        if len(signals) < 2:
+            return base_score
+
+        present: Set[SpamCategory] = {s.category for s in signals}
+        boost = 0.0
+        for combo, value in SpamDetector.SPAM_COMBO_BOOSTS:
+            if combo <= present:
+                boost = max(boost, value)
+        return min(base_score + boost, 1.0)
+
+    def _check_structural_signals(self, text: str, signals: List[SpamSignal]) -> None:
+        if not text:
+            return
+
+        has_other_signals = len(signals) > 0
+
+        spam_emoji_count = sum(1 for c in text if c in SPAM_EMOJI)
+        total_chars = len(text)
+        if total_chars > 0 and spam_emoji_count >= 3:
+            density = spam_emoji_count / total_chars
+            if density >= 0.08:
+                weight = 0.25 if has_other_signals else 0.10
+                signals.append(SpamSignal(
+                    category=SpamCategory.STRUCTURAL_SPAM,
+                    signal=f"Spam emoji cluster ({spam_emoji_count} emoji)",
+                    weight=weight,
+                    matched_text="[emoji cluster]"
+                ))
+
+        alpha_chars = [c for c in text if c.isalpha()]
+        if len(alpha_chars) >= 20:
+            caps_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
+            if caps_ratio >= 0.7 and has_other_signals:
+                signals.append(SpamSignal(
+                    category=SpamCategory.STRUCTURAL_SPAM,
+                    signal=f"Excessive caps ({caps_ratio:.0%})",
+                    weight=0.15,
+                    matched_text="[caps ratio]"
+                ))
+
+        if self.repetitive_punct.search(text):
+            if has_other_signals:
+                signals.append(SpamSignal(
+                    category=SpamCategory.STRUCTURAL_SPAM,
+                    signal="Repetitive punctuation",
+                    weight=0.10,
+                    matched_text=self.repetitive_punct.search(text).group(0)
+                ))
+
     def is_spam(self, text: str, author_name: str = "", like_count: int = 0) -> bool:
         """Simple boolean check for spam."""
         return self.analyze(text, author_name, like_count).is_spam
@@ -1065,10 +1174,6 @@ class SpamDetector:
 # PRESET FILTER STRENGTHS
 # =============================================================================
 
-# Import SpamFilterStrength from core.constants to avoid duplication
-from core.constants import SpamFilterStrength
-
-
 def create_detector(strength: SpamFilterStrength = SpamFilterStrength.MODERATE) -> SpamDetector:
     """Factory function to create a detector with preset strength."""
     return SpamDetector(threshold=strength.value)
@@ -1079,48 +1184,138 @@ def create_detector(strength: SpamFilterStrength = SpamFilterStrength.MODERATE) 
 # =============================================================================
 
 _default_detector: Optional[SpamDetector] = None
+_default_detector_lock = threading.Lock()
 
 
 def get_default_detector() -> SpamDetector:
     """Get or create the default detector instance."""
     global _default_detector
     if _default_detector is None:
-        _default_detector = SpamDetector()
+        with _default_detector_lock:
+            if _default_detector is None:
+                _default_detector = SpamDetector()
     return _default_detector
+
+
+def _get_detector(threshold: float) -> SpamDetector:
+    """Get a detector with the given threshold, reusing the default when possible."""
+    if threshold == 0.5:
+        return get_default_detector()
+    return SpamDetector(threshold=threshold)
 
 
 def is_spam(text: str, threshold: float = 0.5, author_name: str = "", like_count: int = 0) -> bool:
     """
     Quick spam check with optional threshold.
-    
+
     Args:
         text: Comment text to check
         threshold: Spam threshold (0.0 - 1.0)
         author_name: Optional author name for impersonation detection
         like_count: Optional like count for engagement-based legitimacy
-    
+
     Returns:
         True if spam, False otherwise
     """
-    detector = SpamDetector(threshold=threshold)
-    return detector.is_spam(text, author_name, like_count)
+    return _get_detector(threshold).is_spam(text, author_name, like_count)
 
 
 def analyze_comment(text: str, threshold: float = 0.5, author_name: str = "", like_count: int = 0) -> SpamResult:
     """
     Full spam analysis with detailed results.
-    
+
     Args:
         text: Comment text to analyze
         threshold: Spam threshold (0.0 - 1.0)
         author_name: Optional author name
         like_count: Optional like count for engagement-based legitimacy
-    
+
     Returns:
         SpamResult with score, signals, legitimacy bonuses, and classification
     """
-    detector = SpamDetector(threshold=threshold)
-    return detector.analyze(text, author_name, like_count)
+    return _get_detector(threshold).analyze(text, author_name, like_count)
+
+
+# =============================================================================
+# DUPLICATE / CAMPAIGN DETECTION
+# =============================================================================
+
+def _normalize_for_similarity(text: str) -> str:
+    """Normalize text for duplicate comparison — lowercase, collapse whitespace, strip punctuation."""
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s]', '', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text
+
+
+def detect_spam_campaigns(
+    comments: List[str],
+    similarity_threshold: float = 0.85,
+    min_cluster_size: int = 3,
+) -> Set[int]:
+    """
+    Detect duplicate/near-duplicate comment campaigns.
+
+    Spam campaigns blast the same (or slightly varied) comment across videos.
+    This finds clusters of near-identical comments and flags them.
+
+    Args:
+        comments: List of comment texts
+        similarity_threshold: Minimum similarity ratio to consider a pair as duplicates (0.0-1.0)
+        min_cluster_size: Minimum cluster size to flag as a campaign (2+ = strict, 3+ = default)
+
+    Returns:
+        Set of indices into the input list that belong to spam campaigns
+    """
+    if len(comments) < min_cluster_size:
+        return set()
+
+    normalized = [_normalize_for_similarity(c) for c in comments]
+
+    # Phase 1: exact-duplicate grouping (O(n))
+    exact_groups: Dict[str, List[int]] = {}
+    for i, norm in enumerate(normalized):
+        if not norm:
+            continue
+        exact_groups.setdefault(norm, []).append(i)
+
+    campaign_indices: Set[int] = set()
+    for indices in exact_groups.values():
+        if len(indices) >= min_cluster_size:
+            campaign_indices.update(indices)
+
+    # Phase 2: near-duplicate detection among remaining unique texts
+    # Use representative from each exact group to reduce pairwise comparisons
+    representatives: List[Tuple[int, str]] = []
+    for norm, indices in exact_groups.items():
+        if indices[0] not in campaign_indices:
+            representatives.append((indices[0], norm))
+
+    # Pairwise similarity on representatives only
+    for i in range(len(representatives)):
+        if representatives[i][0] in campaign_indices:
+            continue
+        cluster = [representatives[i][0]]
+        for j in range(i + 1, len(representatives)):
+            if representatives[j][0] in campaign_indices:
+                continue
+            ratio = SequenceMatcher(
+                None, representatives[i][1], representatives[j][1]
+            ).ratio()
+            if ratio >= similarity_threshold:
+                cluster.append(representatives[j][0])
+                # Also add all exact duplicates of this representative
+                cluster.extend(exact_groups[representatives[j][1]])
+
+        # Expand cluster with exact duplicates of the seed
+        cluster.extend(exact_groups[representatives[i][1]])
+        # Deduplicate
+        cluster_set = set(cluster)
+
+        if len(cluster_set) >= min_cluster_size:
+            campaign_indices.update(cluster_set)
+
+    return campaign_indices
 
 
 # =============================================================================
@@ -1128,16 +1323,18 @@ def analyze_comment(text: str, threshold: float = 0.5, author_name: str = "", li
 # =============================================================================
 
 def filter_spam_batch(
-    comments: List[dict], 
+    comments: List[dict],
     text_key: str = "Comment Text",
     author_key: str = "Author Name",
     likes_key: str = "Comment Likes",
-    threshold: float = 0.5, 
-    include_scores: bool = False
+    threshold: float = 0.5,
+    include_scores: bool = False,
+    detect_campaigns: bool = True,
+    campaign_min_cluster: int = 3,
 ) -> List[dict]:
     """
     Filter spam from a list of comment dictionaries.
-    
+
     Args:
         comments: List of comment dicts
         text_key: Key for the comment text field
@@ -1145,34 +1342,47 @@ def filter_spam_batch(
         likes_key: Key for the like count field
         threshold: Spam threshold
         include_scores: If True, add spam_score to non-spam comments
-    
+        detect_campaigns: If True, flag duplicate/near-duplicate comment clusters as spam
+        campaign_min_cluster: Minimum cluster size for campaign detection
+
     Returns:
         Filtered list with spam removed
     """
     detector = SpamDetector(threshold=threshold)
+
+    campaign_indices: Set[int] = set()
+    if detect_campaigns:
+        texts = [c.get(text_key, "") for c in comments]
+        campaign_indices = detect_spam_campaigns(
+            texts, min_cluster_size=campaign_min_cluster
+        )
+
     filtered = []
-    
-    for comment in comments:
+
+    for i, comment in enumerate(comments):
+        if i in campaign_indices:
+            continue
+
         text = comment.get(text_key, "")
         author = comment.get(author_key, "")
         likes = comment.get(likes_key, 0)
-        
+
         # Handle likes that might be strings
         if isinstance(likes, str):
             try:
                 likes = int(likes)
             except ValueError:
                 likes = 0
-        
+
         result = detector.analyze(text, author, likes)
-        
+
         if not result.is_spam:
             if include_scores:
                 comment = comment.copy()
                 comment['spam_score'] = result.score
                 comment['spam_signals'] = result.reason if result.signals else ""
             filtered.append(comment)
-    
+
     return filtered
 
 

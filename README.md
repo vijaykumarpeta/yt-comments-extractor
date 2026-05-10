@@ -5,7 +5,7 @@ A powerful desktop application for extracting and filtering YouTube comments wit
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/Version-2.0.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-2.1.0-orange.svg)
 
 ![YouTube Comment Extractor Screenshot](screenshot.png)
 
@@ -41,6 +41,10 @@ The spam filter uses intent-based detection rather than style-based filtering:
 | Self-Promotion | Channel plugs, "check my video" spam |
 | Impersonation | Fake verification badges, suspicious usernames |
 | Obfuscation Attacks | Cyrillic homoglyphs (сontact → contact), leetspeak |
+| Spam Campaigns | Duplicate/near-duplicate comment cluster detection |
+| Structural Spam | Spam emoji clusters, excessive caps, repetitive punctuation |
+
+**Signal combination boosts**: Certain signal pairs (e.g., crypto keywords + contact solicitation) receive a score boost, catching spam that individual signals alone might miss.
 
 **Legitimate comments are protected** through legitimacy signals:
 - Timestamp references ("at 5:32") reduce spam scores
@@ -138,9 +142,9 @@ Without keyring, your API key is stored in `settings.json`. With keyring, it's s
 
 | Level | Threshold | Description |
 |-------|-----------|-------------|
-| **Aggressive** | 0.65 | Catches more spam, slight risk of false positives |
+| **Light** | 0.65 | Only catches obvious spam, minimal false positives |
 | **Moderate** | 0.50 | Balanced filtering (default) |
-| **Light** | 0.35 | Only catches obvious spam, minimal false positives |
+| **Aggressive** | 0.40 | Catches more spam, slight risk of false positives |
 
 ### Filter Words Feature
 
@@ -206,11 +210,16 @@ yt-comments-extractor/
 ├── main.py              # GUI application (CustomTkinter)
 ├── extractor.py         # YouTube API wrapper
 ├── spam_filter.py       # Multi-signal spam detection engine
+├── assets/
+│   └── logo.ico         # Application icon
 ├── core/
 │   ├── __init__.py      # Package exports
 │   ├── constants.py     # App configuration and constants
 │   ├── settings.py      # Settings management with keyring
 │   └── validators.py    # Input validation utilities
+├── tests/
+│   ├── test_spam_filter.py  # Spam detection tests
+│   └── test_validators.py   # Input validation tests
 ├── requirements.txt     # Python dependencies
 ├── pyproject.toml       # Project metadata and build config
 ├── LICENSE              # MIT License
@@ -249,9 +258,12 @@ YouTube's default quota is 10,000 units/day. The app includes automatic rate lim
 The spam filter uses a multi-signal scoring system:
 
 1. **Normalization**: Defeats obfuscation (Cyrillic homoglyphs, leetspeak, zero-width characters)
-2. **Signal Detection**: Checks 13 spam categories with weighted scores
-3. **Legitimacy Bonuses**: Reduces scores for genuine engagement markers
-4. **Threshold Classification**: Final score compared against configurable threshold
+2. **Signal Detection**: Checks 15 spam categories with weighted scores
+3. **Structural Analysis**: Detects spam emoji clusters, excessive caps, and repetitive punctuation as score amplifiers
+4. **Signal Combination Boosts**: High-confidence signal pairs (e.g., crypto + contact solicitation) receive additional score boosts
+5. **Legitimacy Bonuses**: Reduces scores for genuine engagement markers
+6. **Threshold Classification**: Final score compared against configurable threshold
+7. **Campaign Detection**: Batch-level duplicate/near-duplicate clustering flags copy-paste spam campaigns
 
 Default threshold: 0.5 (balanced). Lower = stricter, higher = more permissive.
 
@@ -295,5 +307,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - Spam detection research informed by academic papers on YouTube comment classification
 
 ---
+
+**Built by [Vijay Kumar Peta](https://www.linkedin.com/in/vijayakumarpeta/)**
 
 **Questions or issues?** [Open an issue](https://github.com/vijaykumarpeta/yt-comments-extractor/issues) on GitHub.

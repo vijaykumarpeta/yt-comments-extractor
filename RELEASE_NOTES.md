@@ -1,5 +1,147 @@
 # Release Notes
 
+## Version 2.1.0 (May 2026)
+
+**Smarter spam detection, UI refinements, and comprehensive code quality improvements.**
+
+This release strengthens the spam filter with three new detection layers — duplicate campaign detection, signal combination boosts, and structural analysis — while polishing the UI with brand identity and clearer labeling. Under the hood, 23 code quality issues have been fixed and a full test suite has been added.
+
+---
+
+### ✨ New Features
+
+#### Spam Campaign Detection
+Detects duplicate and near-duplicate comment clusters that indicate coordinated spam campaigns:
+- **Exact duplicate grouping**: Identical comments (after normalization) are grouped in O(n) time
+- **Near-duplicate matching**: Comments with 85%+ similarity are clustered using sequence matching
+- Clusters of 3+ comments are automatically flagged as campaign spam
+- Integrated into batch processing — enabled by default, configurable via `detect_campaigns` parameter
+- Case-insensitive and punctuation-normalized for robust matching
+
+#### Signal Combination Boosts
+Certain signal pairs are far more diagnostic together than individually. Eight high-confidence combinations now receive score boosts:
+
+| Signal Pair | Boost |
+|-------------|-------|
+| Crypto + Contact Solicitation | +0.15 |
+| Crypto + Platform Redirect | +0.15 |
+| Financial Scam + Contact Solicitation | +0.15 |
+| Financial Scam + Platform Redirect | +0.15 |
+| Impersonation + Platform Redirect | +0.15 |
+| Channel Promotion + Shortened URL | +0.12 |
+| Self-Promotion + Shortened URL | +0.12 |
+| Crypto + Financial Scam | +0.10 |
+
+The highest matching boost is applied (not cumulative), preventing runaway scores.
+
+#### Structural / Character Density Analysis
+Three new amplifier signals detect spam-associated text patterns:
+- **Spam emoji clusters**: Flags comments with 3+ spam-associated emoji (💰🚀🔥💎📈 etc.) at 8%+ density
+- **Excessive caps ratio**: Flags 70%+ uppercase text, but only when other spam signals are present
+- **Repetitive punctuation**: Detects "!!!" and "???" patterns as amplifiers
+
+These are **amplifiers only** — they never trigger spam classification on their own, so enthusiastic genuine comments (ALL CAPS excitement, emoji reactions) are not affected.
+
+---
+
+### 🎨 UI Changes
+
+- **Header redesign**: "by Creator Intelligence" brand attribution below the title, with updated tagline
+- **Filter Words label**: Changed to "Only fetch comments with these words" for clarity
+- **Fetch Comments button**: Text color changed to black for better contrast on accent background
+
+---
+
+### 🔧 Code Quality Improvements
+
+23 issues identified and fixed across all severity levels:
+
+**Critical:**
+- Fixed race condition in `_on_closing` — background thread is now joined before window destruction
+- Fixed `FetchState.cancel_event` type annotation (`Optional[threading.Event]`)
+- Cancellation event now passed through to `fetch_comments()` pagination loop
+
+**High:**
+- Thread-safe singleton for default spam detector (double-checked locking)
+- String-matching error handling replaced with typed exception catches
+- Export methods now snapshot data under lock to prevent concurrent modification
+- Removed dead `raise` after `_handle_http_error` in extractor
+- Settings file path now resolves relative to app directory (not CWD)
+
+**Medium:**
+- Leetspeak normalization rewritten per-word — only normalizes chars embedded between alpha chars (prevents "$5000" → "ssooo")
+- Deobfuscation refined: only strips dots/underscores/backticks (preserves apostrophes/hyphens), raised threshold to 50% ratio
+- Pre-compiled words filter pattern for batch performance
+- Removed unused `ExtractionResult` dataclass
+- Removed no-op legacy sort migration
+- Fixed window height default to use constant
+- Moved `SpamFilterStrength` import to top of spam_filter.py
+
+**Low:**
+- Added `MaxCommentsValidator` and `WordsFilterValidator` to core package exports
+- Simplified scroll guard to direct method reference
+- `save_to_csv` and `save_to_excel` now return `List[str]` of files written
+- Fixed `_get_date_range` return type to `Tuple` (capital T)
+- Removed redundant string comparisons in `_sort_comments`
+- `to_dict` now preserves `None` values for settings round-trip
+
+---
+
+### 🧪 Test Suite
+
+Added comprehensive test coverage (138 tests):
+
+| Module | Tests | Coverage |
+|--------|-------|----------|
+| Spam Filter | 83 | Normalization, homoglyphs, all 15 spam categories, legitimacy signals, thresholds, custom patterns, batch processing, signal combos, structural analysis, campaign detection |
+| Validators | 55 | URL validation (all formats), date ranges, API keys, min likes, max comments, words filter with pre-compilation |
+
+---
+
+### 📊 Technical Statistics
+
+| Metric | v2.0.0 | v2.1.0 |
+|--------|--------|--------|
+| Spam Detection Categories | 13 | 15 |
+| Pre-compiled Regex Patterns | 25+ | 27+ |
+| Signal Combination Rules | — | 8 |
+| Test Cases | — | 138 |
+| Files Changed | — | 9 |
+| Lines Added | — | 430+ |
+
+---
+
+### 📝 Full Changelog
+
+**Added:**
+- Spam campaign detection (duplicate/near-duplicate clustering)
+- Signal combination boosts for 8 high-confidence signal pairs
+- Structural spam analysis (emoji density, caps ratio, repetitive punctuation)
+- `STRUCTURAL_SPAM` and `SPAM_CAMPAIGN` spam categories
+- `detect_spam_campaigns()` function for batch-level campaign detection
+- `detect_campaigns` and `campaign_min_cluster` parameters to `filter_spam_batch()`
+- `SPAM_EMOJI` constant set for spam-associated emoji
+- Brand attribution ("by Creator Intelligence") in header
+- 138 tests across spam filter and validators
+- `tests/` directory with `test_spam_filter.py` and `test_validators.py`
+
+**Changed:**
+- Version bumped to 2.1.0
+- App tagline updated to "Extract and filter YouTube comments into a clean, research-ready dataset."
+- "Filter Words" label changed to "Only fetch comments with these words"
+- Fetch Comments button text color changed to black
+- Header height increased to accommodate brand line
+- README updated with new spam detection features, fixed sensitivity threshold table, added tests to project structure
+
+**Fixed:**
+- Race condition in window close with active fetch thread
+- Leetspeak normalization false positives on standalone numbers and symbols
+- Settings file path resolution when run from different working directory
+- Thread safety for default spam detector singleton
+- 23 code quality issues across all modules (see Code Quality Improvements above)
+
+---
+
 ## Version 2.0.0 (December 2025)
 
 **A complete rewrite with modular architecture, advanced spam detection, and powerful filtering capabilities.**

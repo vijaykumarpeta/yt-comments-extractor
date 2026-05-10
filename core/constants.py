@@ -13,8 +13,8 @@ from typing import Dict
 # =============================================================================
 
 APP_NAME = "YouTube Comment Extractor"
-APP_VERSION = "2.0.0"
-APP_DESCRIPTION = "Extract and analyze YouTube comments with ease"
+APP_VERSION = "2.1.0"
+APP_DESCRIPTION = "Extract and filter YouTube comments into a clean, research-ready dataset."
 
 
 # =============================================================================
@@ -22,19 +22,19 @@ APP_DESCRIPTION = "Extract and analyze YouTube comments with ease"
 # =============================================================================
 
 COLORS: Dict[str, str] = {
-    "bg_dark": "#1a1a2e",
-    "bg_card": "#16213e",
-    "bg_input": "#0f0f1a",
-    "accent": "#e94560",
-    "accent_hover": "#ff6b6b",
-    "accent_secondary": "#0f3460",
+    "bg_dark": "#202020",
+    "bg_card": "#2a2a2a",
+    "bg_input": "#181818",
+    "accent": "#ffa028",
+    "accent_hover": "#ffb54d",
+    "accent_secondary": "#3a3a3a",
     "text_primary": "#ffffff",
-    "text_secondary": "#a0a0a0",
-    "text_muted": "#6c6c6c",
+    "text_secondary": "#b0b0b0",
+    "text_muted": "#707070",
     "success": "#4ecca3",
     "warning": "#ffc107",
     "error": "#ff6b6b",
-    "border": "#2a2a4a",
+    "border": "#404040",
 }
 
 

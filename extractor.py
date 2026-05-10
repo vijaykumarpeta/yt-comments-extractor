@@ -6,6 +6,7 @@ using the YouTube Data API v3.
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -22,7 +23,7 @@ from core.constants import (
     SortOption,
 )
 from core.validators import URLValidator, WordsFilterValidator
-from spam_filter import SpamDetector, SpamResult
+from spam_filter import SpamDetector, SpamResult, SpamCategory, detect_spam_campaigns
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +112,6 @@ class SpamComment:
             "Spam Category": self.spam_category,
             "Had Obfuscation": self.had_obfuscation,
         }
-
-
-@dataclass
-class ExtractionResult:
-    """Result of video comment extraction."""
-    metadata: VideoMetadata
-    comments: List[Comment]
-    spam_comments: List[SpamComment]
 
 
 # =============================================================================
@@ -262,7 +255,6 @@ class YouTubeCommentExtractor:
 
         except HttpError as e:
             self._handle_http_error(e, f"fetching video {video_id}")
-            raise  # Re-raise if not handled
 
     def fetch_comments(
         self,
@@ -276,6 +268,7 @@ class YouTubeCommentExtractor:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         filter_words: Optional[List[str]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Tuple[List[Comment], List[SpamComment]]:
         """
         Fetch comments for a video with optional filtering.
@@ -291,12 +284,14 @@ class YouTubeCommentExtractor:
             date_from: Start date filter (YYYY-MM-DD)
             date_to: End date filter (YYYY-MM-DD)
             filter_words: List of words to filter comments (OR logic, whole-word match)
+            cancel_event: Optional threading.Event to support cancellation
 
         Returns:
             Tuple of (comments, spam_comments)
         """
         comments: List[Comment] = []
         spam_comments: List[SpamComment] = []
+        words_pattern = WordsFilterValidator.compile_pattern(filter_words) if filter_words else None
 
         try:
             request = self.youtube.commentThreads().list(
@@ -308,6 +303,9 @@ class YouTubeCommentExtractor:
             )
 
             while request:
+                if cancel_event and cancel_event.is_set():
+                    break
+
                 if max_results and len(comments) >= max_results:
                     break
 
@@ -327,7 +325,7 @@ class YouTubeCommentExtractor:
                         continue
 
                     # Apply words filter (whole-word, case-insensitive, OR logic)
-                    if filter_words and not WordsFilterValidator.matches_any(comment.text, filter_words):
+                    if filter_words and not WordsFilterValidator.matches_any(comment.text, filter_words, words_pattern):
                         continue
 
                     # Apply spam filter last - only on comments that passed all other filters
@@ -382,6 +380,7 @@ class YouTubeCommentExtractor:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         filter_words: Optional[List[str]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Process a video URL and return metadata and comments.
@@ -400,6 +399,7 @@ class YouTubeCommentExtractor:
             date_from: Start date filter
             date_to: End date filter
             filter_words: List of words to filter comments (OR logic, whole-word match)
+            cancel_event: Optional threading.Event to support cancellation
 
         Returns:
             Tuple of (metadata_dict, comments_list, spam_list)
@@ -429,7 +429,32 @@ class YouTubeCommentExtractor:
             date_from=date_from,
             date_to=date_to,
             filter_words=filter_words,
+            cancel_event=cancel_event,
         )
+
+        # Campaign detection — find duplicate/near-duplicate clusters
+        if filter_spam and len(comments) >= 3:
+            campaign_indices = detect_spam_campaigns(
+                [c.text for c in comments]
+            )
+            if campaign_indices:
+                clean = []
+                for i, comment in enumerate(comments):
+                    if i in campaign_indices:
+                        spam_comments.append(SpamComment(
+                            video_id=comment.video_id,
+                            author_name=comment.author_name,
+                            text=comment.text,
+                            published_at=comment.published_at,
+                            like_count=comment.like_count,
+                            spam_score=1.0,
+                            spam_reason="Spam campaign (duplicate/near-duplicate cluster)",
+                            spam_category=SpamCategory.SPAM_CAMPAIGN.value,
+                            had_obfuscation=False,
+                        ))
+                    else:
+                        clean.append(comment)
+                comments = clean
 
         # Update spam count in metadata
         metadata.spam_filtered = len(spam_comments)
@@ -451,7 +476,7 @@ class YouTubeCommentExtractor:
         comments_list: List[Dict[str, Any]],
         base_filename: str,
         spam_list: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
+    ) -> List[str]:
         """
         Save data to CSV files.
 
@@ -464,23 +489,27 @@ class YouTubeCommentExtractor:
             spam_list: Optional list of spam comment dictionaries
 
         Returns:
-            Base filename used
+            List of filenames that were actually written
         """
         encoding = "utf-8-sig"  # BOM for Excel compatibility
+        files_written: List[str] = []
 
         if metadata_list:
-            df_meta = pd.DataFrame(metadata_list)
-            df_meta.to_csv(f"{base_filename}_metadata.csv", index=False, encoding=encoding)
+            path = f"{base_filename}_metadata.csv"
+            pd.DataFrame(metadata_list).to_csv(path, index=False, encoding=encoding)
+            files_written.append(path)
 
         if comments_list:
-            df_comments = pd.DataFrame(comments_list)
-            df_comments.to_csv(f"{base_filename}_comments.csv", index=False, encoding=encoding)
+            path = f"{base_filename}_comments.csv"
+            pd.DataFrame(comments_list).to_csv(path, index=False, encoding=encoding)
+            files_written.append(path)
 
         if spam_list:
-            df_spam = pd.DataFrame(spam_list)
-            df_spam.to_csv(f"{base_filename}_spam.csv", index=False, encoding=encoding)
+            path = f"{base_filename}_spam.csv"
+            pd.DataFrame(spam_list).to_csv(path, index=False, encoding=encoding)
+            files_written.append(path)
 
-        return base_filename
+        return files_written
 
     def save_to_excel(
         self,
@@ -488,7 +517,7 @@ class YouTubeCommentExtractor:
         comments_list: List[Dict[str, Any]],
         filename: str,
         spam_list: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
+    ) -> List[str]:
         """
         Save data to Excel file with multiple sheets.
 
@@ -499,22 +528,24 @@ class YouTubeCommentExtractor:
             spam_list: Optional list of spam comment dictionaries
 
         Returns:
-            Filename used
+            List of sheet names that were written
         """
+        sheets_written: List[str] = []
+
         with pd.ExcelWriter(filename, engine="openpyxl") as writer:
             if metadata_list:
-                df_meta = pd.DataFrame(metadata_list)
-                df_meta.to_excel(writer, sheet_name="Metadata", index=False)
+                pd.DataFrame(metadata_list).to_excel(writer, sheet_name="Metadata", index=False)
+                sheets_written.append("Metadata")
 
             if comments_list:
-                df_comments = pd.DataFrame(comments_list)
-                df_comments.to_excel(writer, sheet_name="Comments", index=False)
+                pd.DataFrame(comments_list).to_excel(writer, sheet_name="Comments", index=False)
+                sheets_written.append("Comments")
 
             if spam_list:
-                df_spam = pd.DataFrame(spam_list)
-                df_spam.to_excel(writer, sheet_name="Flagged Spam", index=False)
+                pd.DataFrame(spam_list).to_excel(writer, sheet_name="Flagged Spam", index=False)
+                sheets_written.append("Flagged Spam")
 
-        return filename
+        return sheets_written
 
     # =========================================================================
     # PRIVATE METHODS
@@ -589,11 +620,11 @@ class YouTubeCommentExtractor:
 
     def _sort_comments(self, comments: List[Comment], sort_by: str) -> List[Comment]:
         """Sort comments by specified method."""
-        if sort_by == SortOption.LIKES.value or sort_by == "likes":
+        if sort_by == SortOption.LIKES.value:
             return sorted(comments, key=lambda x: x.like_count, reverse=True)
-        elif sort_by == SortOption.DATE_NEWEST.value or sort_by == "date_desc":
+        elif sort_by == SortOption.DATE_NEWEST.value:
             return sorted(comments, key=lambda x: x.published_at, reverse=True)
-        elif sort_by == SortOption.DATE_OLDEST.value or sort_by == "date_asc":
+        elif sort_by == SortOption.DATE_OLDEST.value:
             return sorted(comments, key=lambda x: x.published_at, reverse=False)
         return comments
 
