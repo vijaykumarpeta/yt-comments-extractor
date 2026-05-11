@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox
 from typing import Any, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
+from PIL import Image, ImageDraw
 
 from core.constants import (
     APP_NAME,
@@ -167,6 +168,34 @@ class App(ctk.CTk):
     # HEADER CREATION
     # =========================================================================
 
+    @staticmethod
+    def _create_play_icon() -> ctk.CTkImage:
+        """Create a comment-bubble icon with a play triangle inside."""
+        s = 120
+        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        body_top, body_bottom = 6, 88
+        draw.rounded_rectangle(
+            [6, body_top, s - 6, body_bottom],
+            radius=20, outline="white", width=5,
+        )
+
+        tail = [(24, body_bottom - 2), (44, body_bottom - 2), (16, 110)]
+        draw.polygon(tail, fill=(42, 42, 42, 255))
+        draw.line([tail[0], tail[2]], fill="white", width=5)
+        draw.line([tail[2], tail[1]], fill="white", width=5)
+
+        cx, cy = s // 2, (body_top + body_bottom) // 2
+        tri_h = 18
+        tri_w = 16
+        draw.polygon(
+            [(cx - tri_w + 3, cy - tri_h), (cx - tri_w + 3, cy + tri_h), (cx + tri_w, cy)],
+            fill="white",
+        )
+
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(28, 28))
+
     def _create_header(self) -> None:
         """Create the top header with app name and description."""
         self.header_frame = ctk.CTkFrame(
@@ -182,10 +211,13 @@ class App(ctk.CTk):
         header_content = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         header_content.pack(fill="both", expand=True, padx=30, pady=15)
 
-        # App title
+        # App title with play button icon
+        self._play_icon = self._create_play_icon()
         title_label = ctk.CTkLabel(
             header_content,
-            text=f"📺 {APP_NAME}",
+            text=f"  {APP_NAME}",
+            image=self._play_icon,
+            compound="left",
             font=ctk.CTkFont(size=22, weight="bold"),
             text_color=COLORS["text_primary"]
         )
