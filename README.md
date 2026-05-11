@@ -11,11 +11,11 @@ A powerful desktop application for extracting and filtering YouTube comments wit
 
 ## What It Does
 
-YouTube Comment Extractor connects to the YouTube Data API to fetch comments from any public video, then applies sophisticated filtering to separate genuine engagement from spam. The result is clean, organized data ready for analysis—exported as CSV or Excel files with full metadata.
+YouTube Comment Extractor connects to the YouTube Data API to fetch comments from any public video, then applies sophisticated filtering to separate genuine engagement from spam. The result is clean, organized data ready for analysis, exported as CSV or Excel files with full metadata.
 
 ### Why Use This Tool?
 
-YouTube's comment section is flooded with spam. Studies show AI-generated spam now accounts for over 50% of comments on popular videos. This tool uses intent-based detection (not just keyword matching) to identify promotional spam while protecting legitimate comments—even excited fans using ALL CAPS or viewers sharing genuine testimonials.
+YouTube's comment section is flooded with spam. Studies show AI-generated spam now accounts for over 50% of comments on popular videos. This tool uses intent-based detection (not just keyword matching) to identify promotional spam while protecting legitimate comments, even excited fans using ALL CAPS or viewers sharing genuine testimonials.
 
 ## Features
 
