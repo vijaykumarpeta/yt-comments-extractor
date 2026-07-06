@@ -10,11 +10,13 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import threading
 import time
+import tkinter as tk
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw
@@ -119,10 +121,22 @@ class App(ctk.CTk):
         self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.configure(fg_color=COLORS["bg_dark"])
 
-        # Set window icon
+        # Set window icon (iconbitmap only accepts .ico on Windows; fall back
+        # to iconphoto on Linux/macOS where it raises TclError)
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.ico")
         if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
+            try:
+                self.iconbitmap(icon_path)
+            except tk.TclError:
+                try:
+                    # Lazy import: ImageTk is a separate package on some
+                    # distros (python3-pil.imagetk) and only this cosmetic
+                    # fallback needs it
+                    from PIL import ImageTk
+                    self._icon_photo = ImageTk.PhotoImage(Image.open(icon_path))
+                    self.iconphoto(True, self._icon_photo)
+                except Exception:
+                    logger.debug("Could not set window icon")
 
         # Grid configuration - header on top, sidebar + main content below
         self.grid_columnconfigure(0, weight=0)  # Sidebar - fixed width
@@ -1047,7 +1061,8 @@ class App(ctk.CTk):
     # =========================================================================
 
     def _on_closing(self) -> None:
-        """Handle window close event - cancel any running operations."""
+        """Handle window close event - save settings, cancel running operations."""
+        self._save_settings()
         if self.fetch_state.is_fetching:
             self.fetch_state.request_cancel()
             if self._fetch_thread_ref and self._fetch_thread_ref.is_alive():
@@ -1161,12 +1176,31 @@ class App(ctk.CTk):
             self._whitelist_patterns = settings.whitelist_patterns or ""
             self._update_filter_counts()
 
+            # Restore window size
+            width = max(WINDOW_MIN_WIDTH, settings.window_width)
+            height = max(WINDOW_MIN_HEIGHT, settings.window_height)
+            self.geometry(f"{width}x{height}")
+
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
+
+    def _get_window_size(self) -> Tuple[int, int]:
+        """
+        Get the current window size in unscaled units.
+
+        CTk's geometry() getter reverse-applies DPI scaling, while
+        winfo_width()/winfo_height() return physical pixels — using the
+        latter would compound the scaling factor on every save/restore.
+        """
+        match = re.match(r"(\d+)x(\d+)", self.geometry())
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        return WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT
 
     def _save_settings(self) -> None:
         """Save current settings."""
         try:
+            window_width, window_height = self._get_window_size()
             settings = AppSettings(
                 api_key=self.api_key_entry.get().strip(),
                 filter_spam=self.spam_filter_var.get(),
@@ -1178,6 +1212,8 @@ class App(ctk.CTk):
                 sort_by=SortOption.from_display_name(self.sort_var.get()).value,
                 blacklist_patterns=self._blacklist_patterns,
                 whitelist_patterns=self._whitelist_patterns,
+                window_width=window_width,
+                window_height=window_height,
             )
             self.settings_manager.save(settings)
         except Exception as e:
@@ -1394,16 +1430,16 @@ class App(ctk.CTk):
         try:
             for i, url in enumerate(urls):
                 if self.fetch_state.cancel_requested:
-                    self.after(0, lambda: self.log_message("Fetch cancelled by user", "warning"))
+                    self._safe_after(lambda: self.log_message("Fetch cancelled by user", "warning"))
                     break
 
                 video_num = i + 1
-                self.after(0, lambda v=video_num, t=total_videos:
+                self._safe_after(lambda v=video_num, t=total_videos:
                     self.status_label.configure(
                         text=f"Processing video {v}/{t}...",
                         text_color=COLORS["text_secondary"]
                     ))
-                self.after(0, lambda u=url: self.log_message(f"Fetching: {u}", "info"))
+                self._safe_after(lambda u=url: self.log_message(f"Fetching: {u}", "info"))
 
                 try:
                     metadata, comments, spam = self.extractor.process_video(
@@ -1428,28 +1464,28 @@ class App(ctk.CTk):
                     log_msg = f"Retrieved {len(comments):,} comments"
                     if len(spam) > 0:
                         log_msg += f" (filtered {len(spam)} spam)"
-                    self.after(0, lambda msg=log_msg: self.log_message(msg, "success"))
-                    self.after(0, self._update_stats)
+                    self._safe_after(lambda msg=log_msg: self.log_message(msg, "success"))
+                    self._safe_after(self._update_stats)
 
                 except CommentsDisabledError:
-                    self.after(0, lambda:
+                    self._safe_after(lambda:
                         self.log_message("Error: Comments are disabled for this video", "error"))
                 except VideoNotFoundError:
-                    self.after(0, lambda:
+                    self._safe_after(lambda:
                         self.log_message("Error: Video not found", "error"))
                 except QuotaExceededError:
-                    self.after(0, lambda:
+                    self._safe_after(lambda:
                         self.log_message("Error: API quota exceeded. Try again tomorrow.", "error"))
                 except Exception as e:
-                    self.after(0, lambda err=str(e):
+                    self._safe_after(lambda err=str(e):
                         self.log_message(f"Error: {err}", "error"))
 
                 progress = video_num / total_videos
-                self.after(0, lambda p=progress: self.progress_bar.set(p))
+                self._safe_after(lambda p=progress: self.progress_bar.set(p))
 
                 if i < total_videos - 1 and not self.fetch_state.cancel_requested:
                     delay = random.uniform(API_DELAY_BETWEEN_VIDEOS_MIN, API_DELAY_BETWEEN_VIDEOS_MAX)
-                    self.after(0, lambda d=delay:
+                    self._safe_after(lambda d=delay:
                         self.log_message(f"Rate limit delay: {d:.1f}s", "muted"))
                     time.sleep(delay)
 
@@ -1459,30 +1495,40 @@ class App(ctk.CTk):
                 has_comments = len(self.all_comments) > 0
 
             if self.fetch_state.cancel_requested:
-                self.after(0, lambda c=video_count: self.status_label.configure(
+                self._safe_after(lambda c=video_count: self.status_label.configure(
                     text=f"Cancelled — {c} video(s) processed",
                     text_color=COLORS["warning"]
                 ))
             else:
-                self.after(0, lambda c=video_count: self.status_label.configure(
+                self._safe_after(lambda c=video_count: self.status_label.configure(
                     text=f"✓ Completed — {c} video(s) processed",
                     text_color=COLORS["success"]
                 ))
-                self.after(0, lambda: self.log_message("Extraction complete!", "success"))
+                self._safe_after(lambda: self.log_message("Extraction complete!", "success"))
 
             if has_comments:
-                self.after(0, lambda: self.export_button.configure(state="normal"))
-                self.after(0, lambda: self.export_excel_button.configure(state="normal"))
+                self._safe_after(lambda: self.export_button.configure(state="normal"))
+                self._safe_after(lambda: self.export_excel_button.configure(state="normal"))
 
         except Exception as e:
             logger.exception("Fetch thread error")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            self.after(0, lambda: self.status_label.configure(
+            self._safe_after(lambda: messagebox.showerror("Error", str(e)))
+            self._safe_after(lambda: self.status_label.configure(
                 text="Error occurred",
                 text_color=COLORS["error"]
             ))
         finally:
-            self.after(0, self._reset_fetch_ui)
+            self._safe_after(self._reset_fetch_ui)
+
+    def _safe_after(self, callback: Callable[[], None]) -> None:
+        """
+        Schedule a callback on the UI thread, ignoring errors if the window
+        has already been destroyed (e.g. user closed the app mid-fetch).
+        """
+        try:
+            self.after(0, callback)
+        except (RuntimeError, tk.TclError):
+            pass
 
     def _reset_fetch_ui(self) -> None:
         """Reset UI after fetch completes or is cancelled."""
@@ -1492,6 +1538,10 @@ class App(ctk.CTk):
 
     def export_csv(self) -> None:
         """Export data to CSV files."""
+        if self.fetch_state.is_fetching:
+            self.log_message("Export unavailable while fetching", "warning")
+            return
+
         with self._data_lock:
             if not self.all_comments:
                 messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")
@@ -1535,6 +1585,10 @@ class App(ctk.CTk):
 
     def export_excel(self) -> None:
         """Export data to Excel file."""
+        if self.fetch_state.is_fetching:
+            self.log_message("Export unavailable while fetching", "warning")
+            return
+
         with self._data_lock:
             if not self.all_comments:
                 messagebox.showwarning("No Data", "No comments to export. Fetch comments first.")

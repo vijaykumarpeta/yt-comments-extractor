@@ -5,13 +5,15 @@ A powerful desktop application for extracting and filtering YouTube comments wit
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
-![Version](https://img.shields.io/badge/Version-2.1.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-2.1.1-orange.svg)
 
 ![YouTube Comment Extractor Screenshot](screenshot.png)
 
 ## What It Does
 
 YouTube Comment Extractor connects to the YouTube Data API to fetch comments from any public video, then applies sophisticated filtering to separate genuine engagement from spam. The result is clean, organized data ready for analysis, exported as CSV or Excel files with full metadata.
+
+> **Note**: The app extracts **top-level comments** (with their reply counts). Individual replies are not fetched.
 
 ### Why Use This Tool?
 
@@ -145,6 +147,7 @@ Without keyring, your API key is stored in `settings.json`. With keyring, it's s
 | **Light** | 0.65 | Only catches obvious spam, minimal false positives |
 | **Moderate** | 0.50 | Balanced filtering (default) |
 | **Aggressive** | 0.40 | Catches more spam, slight risk of false positives |
+| **Strict** | 0.30 | Maximum filtering, higher risk of false positives |
 
 ### Filter Words Feature
 
@@ -252,6 +255,8 @@ Each video fetch uses approximately:
 - 1 unit per 100 comments
 
 YouTube's default quota is 10,000 units/day. The app includes automatic rate limiting (2-5 second delays between videos) to stay within limits.
+
+> **Tip**: The **Max Comments** limit counts comments that *pass* your filters. With aggressive filters (high min likes, narrow date range, filter words), the app may page through many more comments than the limit to find enough matches — which uses more quota.
 
 ### Spam Detection Architecture
 

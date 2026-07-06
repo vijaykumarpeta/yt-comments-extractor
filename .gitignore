@@ -24,6 +24,8 @@ settings.json
 dist/
 build/
 *.spec
+CODE_MODIFICATIONS.md
+knowledge_graph.md
 
 # OS
 .DS_Store

@@ -5,7 +5,6 @@ Provides functionality to extract comments and metadata from YouTube videos
 using the YouTube Data API v3.
 """
 
-import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -19,13 +18,13 @@ from core.constants import (
     YOUTUBE_API_SERVICE_NAME,
     YOUTUBE_API_VERSION,
     YOUTUBE_COMMENTS_PER_PAGE,
+    YOUTUBE_ORDER_RELEVANCE,
+    YOUTUBE_ORDER_TIME,
     API_DELAY_BETWEEN_PAGES,
     SortOption,
 )
 from core.validators import URLValidator, WordsFilterValidator
 from spam_filter import SpamDetector, SpamResult, SpamCategory, detect_spam_campaigns
-
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -269,6 +268,7 @@ class YouTubeCommentExtractor:
         date_to: Optional[str] = None,
         filter_words: Optional[List[str]] = None,
         cancel_event: Optional[threading.Event] = None,
+        order: str = YOUTUBE_ORDER_RELEVANCE,
     ) -> Tuple[List[Comment], List[SpamComment]]:
         """
         Fetch comments for a video with optional filtering.
@@ -285,6 +285,7 @@ class YouTubeCommentExtractor:
             date_to: End date filter (YYYY-MM-DD)
             filter_words: List of words to filter comments (OR logic, whole-word match)
             cancel_event: Optional threading.Event to support cancellation
+            order: API fetch order ("relevance" or "time")
 
         Returns:
             Tuple of (comments, spam_comments)
@@ -299,7 +300,7 @@ class YouTubeCommentExtractor:
                 videoId=video_id,
                 maxResults=YOUTUBE_COMMENTS_PER_PAGE,
                 textFormat="plainText",
-                order="relevance"
+                order=order
             )
 
             while request:
@@ -358,7 +359,7 @@ class YouTubeCommentExtractor:
                         maxResults=YOUTUBE_COMMENTS_PER_PAGE,
                         textFormat="plainText",
                         pageToken=response["nextPageToken"],
-                        order="relevance"
+                        order=order
                     )
                 else:
                     break
@@ -417,6 +418,17 @@ class YouTubeCommentExtractor:
         # Fetch metadata
         metadata = self.fetch_video_details(video_id)
 
+        # Fetch in time order (newest first) only for the newest-first sort,
+        # so that max_results truncation keeps the newest comments. The API
+        # offers no oldest-first order, so DATE_OLDEST keeps relevance
+        # ranking — fetching "time" there would truncate to the NEWEST
+        # comments and present them as the oldest.
+        fetch_order = (
+            YOUTUBE_ORDER_TIME
+            if sort_by == SortOption.DATE_NEWEST.value
+            else YOUTUBE_ORDER_RELEVANCE
+        )
+
         # Fetch comments
         comments, spam_comments = self.fetch_comments(
             video_id=video_id,
@@ -430,6 +442,7 @@ class YouTubeCommentExtractor:
             date_to=date_to,
             filter_words=filter_words,
             cancel_event=cancel_event,
+            order=fetch_order,
         )
 
         # Campaign detection — find duplicate/near-duplicate clusters
@@ -633,10 +646,12 @@ class YouTubeCommentExtractor:
         status = error.resp.status
         content = error.content.decode("utf-8") if error.content else ""
 
+        content_lower = content.lower()
+
         if status == 403:
-            if "commentsDisabled" in content or "disabled comments" in content.lower():
+            if "commentsdisabled" in content_lower or "disabled comments" in content_lower:
                 raise CommentsDisabledError("Comments are disabled for this video")
-            elif "quotaExceeded" in content.lower():
+            elif "quotaexceeded" in content_lower:
                 raise QuotaExceededError("API quota exceeded. Try again tomorrow.")
             else:
                 raise YouTubeAPIError(f"Access forbidden (403): Check API key permissions")

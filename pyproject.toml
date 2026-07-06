@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yt-comments-extractor"
-version = "2.1.0"
+version = "2.1.1"
 description = "Extract and filter YouTube comments with advanced spam detection"
 readme = "README.md"
 license = {text = "MIT"}
@@ -40,6 +40,7 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -51,10 +52,13 @@ secure = [
 yt-comments = "main:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/yt-comments-extractor"
-Documentation = "https://github.com/yourusername/yt-comments-extractor#readme"
-Repository = "https://github.com/yourusername/yt-comments-extractor.git"
-Issues = "https://github.com/yourusername/yt-comments-extractor/issues"
+Homepage = "https://github.com/vijaykumarpeta/yt-comments-extractor"
+Documentation = "https://github.com/vijaykumarpeta/yt-comments-extractor#readme"
+Repository = "https://github.com/vijaykumarpeta/yt-comments-extractor.git"
+Issues = "https://github.com/vijaykumarpeta/yt-comments-extractor/issues"
+
+[tool.setuptools]
+py-modules = ["main", "extractor", "spam_filter"]
 
 [tool.setuptools.packages.find]
 where = ["."]

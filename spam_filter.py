@@ -1,7 +1,7 @@
 """
 Spam Detection Module for YouTube Comments.
 
-Version: 2.1.0
+Version: 2.1.1
 
 A multi-signal scoring system that focuses on promotional INTENT rather than
 writing style. Designed to catch spam while protecting legitimate engagement
@@ -330,9 +330,10 @@ class SpamDetector:
                       Lower = more aggressive filtering (catches more, risks false positives)
                       Higher = more permissive (misses some spam, fewer false positives)
 
-                      Recommended values:
-                      - 0.35: Aggressive (strict filtering)
-                      - 0.50: Balanced (default)
+                      Recommended values (see SpamFilterStrength):
+                      - 0.30: Strict (maximum filtering)
+                      - 0.40: Aggressive
+                      - 0.50: Moderate (default)
                       - 0.65: Light (only obvious spam)
 
             blacklist_patterns: List of custom patterns to always flag as spam.
@@ -398,15 +399,29 @@ class SpamDetector:
         # CONTACT SOLICITATION & PLATFORM REDIRECT
         # =====================================================================
         
+        # Shared vocabularies — every contact-solicitation branch builds from
+        # these, so adding a verb or platform updates all branches at once
+        contact_verbs = r'contact|message|text|chat\s*with|reach|dm|pm|inbox'
+        im_platforms = r'whatsapp|telegram|signal|wechat|line|viber|discord'
+        social_platforms = r'instagram|ig|facebook|fb|twitter|x|tiktok|snapchat'
+        all_platforms = f'{im_platforms}|{social_platforms}'
+
         self.contact_solicitation = re.compile(
-            r'\b(contact|message|text|chat\s*with|reach|dm|pm|inbox)\s*(me|us|him|her)?\s*'
-            r'(on|at|via|through|@)?\s*'
-            r'(whatsapp|telegram|signal|wechat|line|viber|discord|'
-            r'instagram|ig|facebook|fb|twitter|x|tiktok|snapchat)?\b|'
-            r'\b(whatsapp|telegram|signal|discord)\s*(me|us|now|today|asap)?\b|'
+            # Verb (+ optional pronoun/preposition) followed by a REQUIRED platform.
+            # The platform must be present so bare everyday words like "text",
+            # "message", or "reach" are not flagged on their own.
+            rf'\b({contact_verbs})\s*(me|us|him|her)?\s*'
+            rf'(on|at|via|through|@)?\s*({all_platforms})\b|'
+            # Platform used as a verb with a REQUIRED target/urgency word —
+            # bare platform mentions ("discord is down") are not flagged
+            rf'\b({im_platforms})\s+(me|us|now|today|asap)\b|'
+            # Invitation to an IM platform: "join us on telegram", "join telegram"
+            rf'\b(join|find)\s*(me|us)?\s*(on|at|via)?\s*({im_platforms})\b|'
             r'\bsend\s*(a\s*)?(dm|pm|message)\b|'
             r'\b(hit|slide\s*into)\s*(my|the)?\s*(dm|inbox)\b|'
-            r'\b(add|follow)\s*me\s*(on|@)\b',
+            r'\b(add|follow)\s*me\s*(on|@)\b|'
+            # Verb + direct pronoun without a platform is still suspicious
+            rf'\b({contact_verbs})\s+(me|us)\b',
             re.IGNORECASE
         )
         
@@ -423,7 +438,9 @@ class SpamDetector:
         self.phone_patterns = re.compile(
             r'(\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9})|'
             r'(\(\d{3}\)\s*\d{3}[-.\s]?\d{4})|'
-            r'(\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b)|'
+            # Separators required — a plain 10-digit integer (view counts,
+            # subscriber milestones) is not a phone number
+            r'(\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)|'
             r'(\+\d{10,15}\b)'
         )
         
@@ -540,12 +557,18 @@ class SpamDetector:
         # =====================================================================
         
         self.adult_content = re.compile(
-            r'\b(onlyfans|of\s*link|18\+|adult\s*content|'
+            r'\b(onlyfans|18\+|adult\s*content|'
             r'xxx|porn|nude|nudes|sexy\s*(pics?|photos?|videos?)|'
             r'dating\s*(site|app)|hookup|'
             r's[e3]x(y|ting)?|h[o0]rny|'
             r'(check|see)\s*(my|the)\s*(profile|bio)\s*[;)😉🔥💋])\b',
             re.IGNORECASE
+        )
+
+        # "OF link" (OnlyFans abbreviation) — case-SENSITIVE so the common
+        # English phrase "of link" ("this kind of link") is not flagged
+        self.adult_content_of = re.compile(
+            r'\bOF\s+(link|page|account|content)\b'
         )
         
         # =====================================================================
@@ -557,9 +580,16 @@ class SpamDetector:
             r'who(\s*else)?\s*(is\s*)?(here|watching)\s*(in\s*)?20\d{2}|'
             r'like\s*this\s*comment\s*(if|so)|'
             r'anyone\s*(else\s*)?(here\s*)?(in|from)\s*20\d{2}|'
-            r'^first[!\.\s]*$|^second[!\.\s]*$|^third[!\.\s]*$|'  # Only match standalone
             r'early\s*squad|notification\s*squad|'
             r'who\'?s\s*(still\s*)?(watching|listening)\s*(this\s*)?(in\s*)?20\d{2})\b',
+            re.IGNORECASE
+        )
+
+        # Standalone "First!" / "Second!" comments — kept as a separate pattern
+        # because ^/$ anchors and trailing punctuation don't compose with the
+        # \b-wrapped alternation above
+        self.first_comment_bait = re.compile(
+            r'^\s*(first|second|third)[!\.\s]*$',
             re.IGNORECASE
         )
         
@@ -928,7 +958,7 @@ class SpamDetector:
         
         # --- Adult Content ---
         
-        if self.adult_content.search(normalized):
+        if self.adult_content.search(normalized) or self.adult_content_of.search(normalized):
             signals.append(SpamSignal(
                 category=SpamCategory.ADULT_CONTENT,
                 signal="Adult/inappropriate content",
@@ -938,7 +968,8 @@ class SpamDetector:
         
         # --- Engagement Bait (LOW weight) ---
 
-        match = self.engagement_bait.search(normalized)
+        match = (self.engagement_bait.search(normalized)
+                 or self.first_comment_bait.match(normalized))
         if match:
             signals.append(SpamSignal(
                 category=SpamCategory.ENGAGEMENT_BAIT,
@@ -1248,10 +1279,17 @@ def _normalize_for_similarity(text: str) -> str:
     return text
 
 
+# Comments shorter than this (normalized) are exempt from campaign clustering:
+# short generic praise ("Love this!", "Can't wait") is organically duplicated
+# by many genuine viewers, while real campaigns copy-paste longer text
+CAMPAIGN_MIN_TEXT_LENGTH = 30
+
+
 def detect_spam_campaigns(
     comments: List[str],
     similarity_threshold: float = 0.85,
     min_cluster_size: int = 3,
+    min_text_length: int = CAMPAIGN_MIN_TEXT_LENGTH,
 ) -> Set[int]:
     """
     Detect duplicate/near-duplicate comment campaigns.
@@ -1259,10 +1297,16 @@ def detect_spam_campaigns(
     Spam campaigns blast the same (or slightly varied) comment across videos.
     This finds clusters of near-identical comments and flags them.
 
+    Short comments are exempt: generic praise like "Love this!" or "Can't
+    wait" is organically duplicated by many genuine viewers, while real
+    campaigns copy-paste longer promotional text.
+
     Args:
         comments: List of comment texts
         similarity_threshold: Minimum similarity ratio to consider a pair as duplicates (0.0-1.0)
         min_cluster_size: Minimum cluster size to flag as a campaign (2+ = strict, 3+ = default)
+        min_text_length: Minimum normalized text length to participate in
+                         clustering — shorter comments are never flagged
 
     Returns:
         Set of indices into the input list that belong to spam campaigns
@@ -1275,7 +1319,7 @@ def detect_spam_campaigns(
     # Phase 1: exact-duplicate grouping (O(n))
     exact_groups: Dict[str, List[int]] = {}
     for i, norm in enumerate(normalized):
-        if not norm:
+        if not norm or len(norm) < min_text_length:
             continue
         exact_groups.setdefault(norm, []).append(i)
 
@@ -1291,17 +1335,46 @@ def detect_spam_campaigns(
         if indices[0] not in campaign_indices:
             representatives.append((indices[0], norm))
 
-    # Pairwise similarity on representatives only
+    # Pairwise similarity on representatives only.
+    # SequenceMatcher.ratio() is expensive, so pairs are pruned with cheap
+    # SOUND prefilters first — each is a mathematical upper bound on ratio(),
+    # so no pair that could match is ever skipped:
+    #   1. Length bound: ratio() <= 2*min(len)/(len_a+len_b). Representatives
+    #      are sorted by length, so once b is too long the bound fails for
+    #      every later b as well — break, not continue.
+    #   2. Char-multiset bound (identical to quick_ratio()) computed from
+    #      per-representative Counters cached up front, instead of recounting
+    #      b's characters for every pair.
+    representatives.sort(key=lambda item: len(item[1]))
+    rep_counters = [Counter(norm) for _, norm in representatives]
+
     for i in range(len(representatives)):
         if representatives[i][0] in campaign_indices:
             continue
         cluster = [representatives[i][0]]
+        a = representatives[i][1]
+        len_a = len(a)
+        counter_a = rep_counters[i]
+        if similarity_threshold > 0:
+            max_len_b = len_a * (2.0 - similarity_threshold) / similarity_threshold
+        else:
+            max_len_b = float("inf")
+        matcher: Optional[SequenceMatcher] = None
         for j in range(i + 1, len(representatives)):
+            b = representatives[j][1]
+            if len(b) > max_len_b:
+                break
             if representatives[j][0] in campaign_indices:
                 continue
-            ratio = SequenceMatcher(
-                None, representatives[i][1], representatives[j][1]
-            ).ratio()
+            # matches chars in common (as multisets) — equals quick_ratio()
+            matches = sum((counter_a & rep_counters[j]).values())
+            if 2.0 * matches < similarity_threshold * (len_a + len(b)):
+                continue
+            if matcher is None:
+                matcher = SequenceMatcher(None)
+                matcher.set_seq2(a)  # expensive analysis, cached for the inner loop
+            matcher.set_seq1(b)
+            ratio = matcher.ratio()
             if ratio >= similarity_threshold:
                 cluster.append(representatives[j][0])
                 # Also add all exact duplicates of this representative
@@ -1331,6 +1404,7 @@ def filter_spam_batch(
     include_scores: bool = False,
     detect_campaigns: bool = True,
     campaign_min_cluster: int = 3,
+    campaign_min_text_length: int = CAMPAIGN_MIN_TEXT_LENGTH,
 ) -> List[dict]:
     """
     Filter spam from a list of comment dictionaries.
@@ -1344,6 +1418,8 @@ def filter_spam_batch(
         include_scores: If True, add spam_score to non-spam comments
         detect_campaigns: If True, flag duplicate/near-duplicate comment clusters as spam
         campaign_min_cluster: Minimum cluster size for campaign detection
+        campaign_min_text_length: Minimum normalized text length for campaign
+                                  clustering (shorter comments are never flagged)
 
     Returns:
         Filtered list with spam removed
@@ -1354,7 +1430,9 @@ def filter_spam_batch(
     if detect_campaigns:
         texts = [c.get(text_key, "") for c in comments]
         campaign_indices = detect_spam_campaigns(
-            texts, min_cluster_size=campaign_min_cluster
+            texts,
+            min_cluster_size=campaign_min_cluster,
+            min_text_length=campaign_min_text_length,
         )
 
     filtered = []

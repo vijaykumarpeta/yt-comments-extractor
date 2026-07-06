@@ -1,5 +1,48 @@
 # Release Notes
 
+## Version 2.1.1 (July 2026)
+
+**Bug-fix release: error handling, packaging, spam-filter false positives, and performance.**
+
+All fixes originate from a full-codebase review; every fix ships with a regression test (163 tests total, up from 138).
+
+---
+
+### 🐛 Bug Fixes
+
+**Critical:**
+- **Quota-exceeded detection never fired** — a case-sensitivity bug meant `QuotaExceededError` was never raised; quota errors surfaced as a generic 403 message. Users now see "API quota exceeded. Try again tomorrow." as intended.
+- **API key could be silently lost** — if the system keyring was importable but the write failed at runtime (common on headless Linux/WSL), the key was stored neither in the keyring nor in `settings.json`. It now falls back to file storage when the keyring write fails.
+- **`pip install` produced a broken `yt-comments` entry point** — only the `core` package was included in the build; `main`, `extractor`, and `spam_filter` are now packaged, and `Pillow` was added to the declared dependencies.
+- **Startup crash on Linux** — setting the window icon with `.ico` raises `TclError` on X11; the app now falls back to `iconphoto` and never crashes over an icon.
+
+**High:**
+- `Ctrl+S` / `Ctrl+E` no longer trigger exports while a fetch is running (previously bypassed the disabled export buttons and could export a half-fetched dataset).
+- Closing the window mid-fetch no longer spews `RuntimeError: main thread is not in main loop` from the background thread.
+
+### 🎯 Spam Filter — False Positive Fixes
+
+- **Organic short praise is no longer flagged as a spam campaign** — comments like "Love this!", "Can't wait", or "Lets gooooo" are naturally written by many genuine viewers and were being clustered as duplicate campaigns (on one real video, 148 of 149 spam flags were this false positive). Campaign detection now only considers comments of 30+ normalized characters; real copy-paste campaigns use longer promotional text, and short promotional spam is still caught by the per-comment signals.
+- **Bare everyday words no longer flag contact solicitation** — "I read the *text* on screen", "Great *message*", "This will *reach* many people" scored 0.45 each; the pattern now requires a platform (or a direct "contact/dm me" construction). Real solicitations ("Contact me on WhatsApp", "dm me") are still detected.
+- **Plain 10-digit numbers are no longer phone numbers** — view counts like `1234567890` were flagged; separators are now required (`555-123-4567` and `+15551234567` still detected).
+- **"kind of link" no longer triggers adult-content** — the overly broad `of link` (OnlyFans abbreviation) pattern was removed; `onlyfans` still covers real cases.
+- **"First!" is now caught as engagement bait** — the standalone first/second/third pattern couldn't match trailing punctuation; it's now a dedicated pattern, and "first time watching this channel" is correctly left alone.
+
+### ⚡ Performance
+
+- **Campaign detection is dramatically faster on large videos** — representatives are length-sorted (turning the length bound into an early break) and pruned with a cached character-multiset bound before any expensive `ratio()` call. Both prefilters are mathematically sound upper bounds on the similarity ratio, so detection behavior is unchanged. Realistic batches: 2,000 comments ~3s, 5,000 comments ~21s (previously minutes).
+
+### 🔧 Other Improvements
+
+- Window size is now saved and restored between sessions (saved on window close, DPI-scaling aware)
+- "Date (Newest)" now fetches in `time` order from the API, so a Max Comments limit keeps the newest comments instead of a relevance-ranked subset ("Date (Oldest)" keeps relevance order — the API offers no oldest-first fetch)
+- Docstring/README threshold values aligned with actual presets (Strict 0.30 level now documented)
+- README notes: top-level comments only; Max Comments interacts with filters (quota impact)
+- Fixed placeholder GitHub URLs in `pyproject.toml`
+- Removed unused imports
+
+---
+
 ## Version 2.1.0 (May 2026)
 
 **Smarter spam detection, UI refinements, and comprehensive code quality improvements.**

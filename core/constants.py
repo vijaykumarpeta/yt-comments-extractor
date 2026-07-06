@@ -13,7 +13,7 @@ from typing import Dict
 # =============================================================================
 
 APP_NAME = "YouTube Comment Extractor"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 APP_DESCRIPTION = "Extract and filter YouTube comments into a clean, research-ready dataset."
 
 
@@ -46,6 +46,10 @@ COLORS: Dict[str, str] = {
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 YOUTUBE_COMMENTS_PER_PAGE = 100
+
+# commentThreads.list order values (the API offers no oldest-first order)
+YOUTUBE_ORDER_RELEVANCE = "relevance"
+YOUTUBE_ORDER_TIME = "time"  # newest first
 
 # Rate limiting
 API_DELAY_BETWEEN_PAGES = 0.5  # seconds

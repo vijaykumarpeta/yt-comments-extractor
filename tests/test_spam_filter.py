@@ -509,9 +509,9 @@ class TestDuplicateDetection:
     def test_exact_duplicates_detected(self):
         comments = [
             "Great video!",
-            "Check out my channel for more",
-            "Check out my channel for more",
-            "Check out my channel for more",
+            "Check out my channel for more videos",
+            "Check out my channel for more videos",
+            "Check out my channel for more videos",
             "Thanks for watching",
         ]
         campaign = detect_spam_campaigns(comments, min_cluster_size=3)
@@ -556,16 +556,17 @@ class TestDuplicateDetection:
         assert len(campaign) == 0
 
     def test_campaign_detection_in_batch_filter(self):
+        spam_text = "Check my profile link for free giveaways today"
         comments = [
             {"Comment Text": "Great video!", "Author Name": "A", "Comment Likes": 0},
-            {"Comment Text": "Check my profile link", "Author Name": "Bot1", "Comment Likes": 0},
-            {"Comment Text": "Check my profile link", "Author Name": "Bot2", "Comment Likes": 0},
-            {"Comment Text": "Check my profile link", "Author Name": "Bot3", "Comment Likes": 0},
+            {"Comment Text": spam_text, "Author Name": "Bot1", "Comment Likes": 0},
+            {"Comment Text": spam_text, "Author Name": "Bot2", "Comment Likes": 0},
+            {"Comment Text": spam_text, "Author Name": "Bot3", "Comment Likes": 0},
             {"Comment Text": "Thanks!", "Author Name": "B", "Comment Likes": 0},
         ]
         filtered = filter_spam_batch(comments, detect_campaigns=True, campaign_min_cluster=3)
         texts = [c["Comment Text"] for c in filtered]
-        assert "Check my profile link" not in texts
+        assert spam_text not in texts
         assert "Great video!" in texts
         assert "Thanks!" in texts
 
@@ -580,9 +581,9 @@ class TestDuplicateDetection:
 
     def test_case_and_punctuation_normalized(self):
         comments = [
-            "Contact me for signals!",
-            "CONTACT ME FOR SIGNALS!",
-            "contact me for signals",
+            "Contact me for exclusive trading signals!",
+            "CONTACT ME FOR EXCLUSIVE TRADING SIGNALS!",
+            "contact me for exclusive trading signals",
             "Unique comment here",
         ]
         campaign = detect_spam_campaigns(comments, min_cluster_size=3)
@@ -590,3 +591,192 @@ class TestDuplicateDetection:
         assert 1 in campaign
         assert 2 in campaign
         assert 3 not in campaign
+
+    def test_short_organic_praise_not_flagged(self):
+        # Real-world false positive: many genuine viewers write identical
+        # short praise — this must never be treated as a campaign
+        comments = [
+            "Love this!", "Love this", "Love this!", "love this!!!", "Love this",
+            "Can't wait!", "Can’t wait!", "Cant wait!", "Can't wait",
+            "Lets gooooo", "Let’s gooooo", "LETS GOOOO", "lets gooooo",
+            "This is awesome!", "This is so good!", "This is so good",
+            "Nice", "Nice", "Nice!", "Great", "Great!", "Fire", "Fire",
+            "This is gonna be good!!!",
+        ]
+        campaign = detect_spam_campaigns(comments, min_cluster_size=3)
+        assert campaign == set()
+
+    def test_long_campaign_still_flagged_among_praise(self):
+        spam = "Contact me on WhatsApp for exclusive crypto trading signals"
+        comments = ["Love this!", spam, "Love this", spam, "Can't wait!", spam]
+        campaign = detect_spam_campaigns(comments, min_cluster_size=3)
+        assert campaign == {1, 3, 5}
+
+    def test_different_length_texts_not_clustered(self):
+        # Length prefilter must not change behavior: very different texts stay unclustered
+        comments = [
+            "Hi",
+            "This is a much longer comment about the video content in detail",
+            "Another completely different comment talking about something else",
+        ]
+        campaign = detect_spam_campaigns(comments, min_cluster_size=2)
+        assert len(campaign) == 0
+
+
+# =============================================================================
+# FALSE POSITIVE REGRESSIONS (v2.1.1)
+# =============================================================================
+
+class TestFalsePositiveRegressions:
+    """Regression tests for false positives fixed in v2.1.1."""
+
+    def setup_method(self):
+        self.detector = SpamDetector(threshold=0.5)
+
+    # --- Contact solicitation: bare everyday words must not be flagged ---
+
+    def test_bare_text_word_not_contact(self):
+        result = self.detector.analyze("I read the text on screen")
+        assert not any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_bare_message_word_not_contact(self):
+        result = self.detector.analyze("Great message in this video")
+        assert not any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_bare_reach_word_not_contact(self):
+        result = self.detector.analyze("This will reach so many people")
+        assert not any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_contact_me_still_detected(self):
+        result = self.detector.analyze("Contact me for exclusive deals")
+        assert any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_dm_me_still_detected(self):
+        result = self.detector.analyze("dm me for the details")
+        assert any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_contact_on_platform_still_detected(self):
+        result = self.detector.analyze(
+            "Contact me on WhatsApp for exclusive trading signals and guaranteed profits!"
+        )
+        assert result.is_spam is True
+
+    # --- Phone numbers: plain 10-digit integers must not be flagged ---
+
+    def test_plain_ten_digit_number_not_phone(self):
+        result = self.detector.analyze("The video hit 1234567890 views")
+        assert not any("phone" in s.signal.lower() for s in result.signals)
+
+    def test_separated_phone_still_detected(self):
+        result = self.detector.analyze("call 555-123-4567 for signals")
+        assert any("phone" in s.signal.lower() for s in result.signals)
+
+    def test_international_phone_still_detected(self):
+        result = self.detector.analyze("reach us +15551234567")
+        assert any("phone" in s.signal.lower() for s in result.signals)
+
+    # --- Adult content: "of link" phrase must not be flagged ---
+
+    def test_of_link_phrase_not_adult(self):
+        result = self.detector.analyze("this kind of link is helpful")
+        assert not any(
+            s.category == SpamCategory.ADULT_CONTENT for s in result.signals
+        )
+
+    def test_onlyfans_still_detected(self):
+        result = self.detector.analyze("Check my onlyfans link in bio")
+        assert result.is_spam is True
+
+    # --- Engagement bait: standalone "First!" with punctuation ---
+
+    def test_first_with_punctuation_is_bait(self):
+        result = self.detector.analyze("First!")
+        assert any(
+            s.category == SpamCategory.ENGAGEMENT_BAIT for s in result.signals
+        )
+
+    def test_first_all_caps_is_bait(self):
+        result = self.detector.analyze("FIRST!!!")
+        assert any(
+            s.category == SpamCategory.ENGAGEMENT_BAIT for s in result.signals
+        )
+
+    def test_first_in_sentence_not_bait(self):
+        result = self.detector.analyze("first time watching this channel, great stuff")
+        assert not any(
+            s.category == SpamCategory.ENGAGEMENT_BAIT for s in result.signals
+        )
+
+    # --- Bare platform mentions must not be flagged, even at Aggressive ---
+
+    def test_bare_platform_mention_not_flagged_aggressive(self):
+        detector = SpamDetector(threshold=0.4)
+        assert detector.analyze("discord is down again today").is_spam is False
+        assert detector.analyze("the signal is weak in my area").is_spam is False
+
+
+# =============================================================================
+# DETECTION REGRESSIONS (v2.1.1 final review)
+# =============================================================================
+
+class TestDetectionRegressions:
+    """Real spam that must stay detected after the v2.1.1 FP fixes."""
+
+    def setup_method(self):
+        self.detector = SpamDetector(threshold=0.5)
+
+    def test_text_me_with_phone_is_spam(self):
+        result = self.detector.analyze("Text me at 555 123 4567 for quick profits")
+        assert result.is_spam is True
+
+    def test_message_me_solicitation_detected(self):
+        result = self.detector.analyze("message me for the best trading signals")
+        assert any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_join_us_on_telegram_detected(self):
+        result = self.detector.analyze("Join us on telegram for exclusive tips")
+        assert any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_whatsapp_me_still_detected(self):
+        result = self.detector.analyze("whatsapp me now for details")
+        assert any(
+            s.category == SpamCategory.CONTACT_SOLICITATION for s in result.signals
+        )
+
+    def test_of_link_uppercase_is_spam(self):
+        result = self.detector.analyze("check my OF link in bio")
+        assert result.is_spam is True
+
+    def test_obfuscated_campaign_still_clustered(self):
+        # Per-word obfuscation keeps char-level similarity high; the campaign
+        # detector must not prune such pairs before computing ratio()
+        base = "make money fast with john trading platform guaranteed profits every day"
+        mutated = ("makee moneyy fastt withh johnn tradingg platformm "
+                   "guaranteedd profitss everyy dayy")
+        campaign = detect_spam_campaigns([base, mutated, base + " now"], min_cluster_size=2)
+        assert campaign == {0, 1, 2}
+
+    def test_short_campaign_flagged_with_lowered_min_length(self):
+        # min_text_length is plumbed through filter_spam_batch for callers
+        # who want to clamp down on short-text campaigns
+        comments = [
+            {"Comment Text": "Check out my new channel!!",
+             "Author Name": f"B{i}", "Comment Likes": 0}
+            for i in range(5)
+        ]
+        filtered = filter_spam_batch(comments, campaign_min_text_length=10)
+        assert filtered == []

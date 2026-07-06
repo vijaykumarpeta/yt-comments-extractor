@@ -162,11 +162,12 @@ class SettingsManager:
             True if saved successfully
         """
         try:
-            # Save API key securely
-            self._save_api_key(settings.api_key)
+            # Save API key securely (returns False if keyring is unavailable or failed)
+            stored_in_keyring = self._save_api_key(settings.api_key)
 
-            # Save other settings to JSON (without API key if using keyring)
-            include_api_key = not self._use_keyring
+            # Save other settings to JSON; include the API key in the file only
+            # when it was NOT stored in the keyring, so it is never silently lost
+            include_api_key = bool(settings.api_key) and not stored_in_keyring
             data = settings.to_dict(include_api_key=include_api_key)
 
             with open(self.settings_file, 'w', encoding='utf-8') as f:
@@ -203,10 +204,16 @@ class SettingsManager:
 
         return None
 
-    def _save_api_key(self, api_key: str) -> None:
-        """Save API key to keyring or settings file."""
+    def _save_api_key(self, api_key: str) -> bool:
+        """
+        Save API key to the system keyring.
+
+        Returns:
+            True if the key was stored in the keyring, False if the caller
+            should persist it in the settings file instead.
+        """
         if not api_key:
-            return
+            return False
 
         if self._use_keyring:
             try:
@@ -215,13 +222,22 @@ class SettingsManager:
                     KEYRING_API_KEY_NAME,
                     api_key
                 )
-                return
+                return True
             except Exception as e:
                 logger.warning(f"Failed to save API key to keyring: {e}")
+                # Best effort: remove any stale keyring entry so it cannot
+                # shadow the newer key stored in the settings file on load()
+                try:
+                    keyring.delete_password(
+                        KEYRING_SERVICE_NAME, KEYRING_API_KEY_NAME
+                    )
+                except Exception:
+                    pass
                 # Fall through to file storage
 
         # If keyring unavailable or failed, it will be saved with other settings
         logger.debug("API key will be stored in settings file (less secure)")
+        return False
 
     def delete_api_key(self) -> bool:
         """
